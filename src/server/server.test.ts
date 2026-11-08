@@ -1919,6 +1919,79 @@ describe('Server Integration Tests', () => {
     });
   });
 
+  describe('Approve API', () => {
+    it('outputs the comments once followed by the approval and exits even with keepAlive', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const { port, server } = await startServer({
+          selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
+          keepAlive: true,
+          preferredPort: 9085,
+        });
+        servers.push(server);
+
+        const controller = new AbortController();
+        const heartbeat = await fetch(`http://localhost:${port}/api/heartbeat`, {
+          signal: controller.signal,
+        });
+        await heartbeat.body?.getReader().read();
+
+        const response = await fetch(`http://localhost:${port}/api/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            comments: [
+              {
+                id: '1',
+                file: 'src/App.tsx',
+                line: 10,
+                body: 'Rename this variable',
+                timestamp: '2024-01-01T00:00:00Z',
+              },
+            ],
+          }),
+        });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ success: true });
+
+        controller.abort();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        const output = logSpy.mock.calls.map((args) => args.join(' '));
+        const commentOutputs = output.filter((line) => line.includes('src/App.tsx:L10'));
+        expect(commentOutputs).toHaveLength(1);
+        expect(commentOutputs[0]).toContain('Rename this variable');
+        expect(output.indexOf('✅ Approved')).toBeGreaterThan(output.indexOf(commentOutputs[0]!));
+        expect(output.filter((line) => line === '✅ Approved')).toHaveLength(1);
+        expect(output).not.toContain(
+          'Client disconnected, but server is staying alive (--keep-alive)',
+        );
+        expect(process.exit).toHaveBeenCalledTimes(1);
+        expect(process.exit).toHaveBeenCalledWith(0);
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+
+    it('rejects invalid comment data without shutting down', async () => {
+      const { port, server } = await startServer({
+        selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
+        preferredPort: 9090,
+      });
+      servers.push(server);
+
+      const response = await fetch(`http://localhost:${port}/api/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threads: [null] }),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      expect(response.status).toBe(400);
+      expect(process.exit).not.toHaveBeenCalled();
+    });
+  });
+
   describe('Finding decisions', () => {
     let repoPath: string;
 

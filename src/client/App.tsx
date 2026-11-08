@@ -1,4 +1,12 @@
-import { Columns, AlignLeft, Settings, PanelLeftClose, PanelLeft, Keyboard } from 'lucide-react';
+import {
+  Columns,
+  AlignLeft,
+  Settings,
+  PanelLeftClose,
+  PanelLeft,
+  Keyboard,
+  Check,
+} from 'lucide-react';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 import {
@@ -173,6 +181,9 @@ function App() {
   const [hasTriggeredSparkles, setHasTriggeredSparkles] = useState(false);
   const [isCommentsListOpen, setIsCommentsListOpen] = useState(false);
   const [isRevisionModalOpen, setIsRevisionModalOpen] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
+  const [isApproved, setIsApproved] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const collapsedInitializedRef = useRef(false);
   const diffScrollContainerRef = useRef<HTMLElement | null>(null);
@@ -632,14 +643,14 @@ function App() {
   const isAnyReviewerRunning = doneReviewerCount < reviewers.length;
 
   useEffect(() => {
-    if (!isAnyReviewerRunning) return;
+    if (!isAnyReviewerRunning || isApproved) return;
 
     const confirmLeaveWhileReviewing = (event: BeforeUnloadEvent) => {
       event.preventDefault();
     };
     window.addEventListener('beforeunload', confirmLeaveWhileReviewing);
     return () => window.removeEventListener('beforeunload', confirmLeaveWhileReviewing);
-  }, [isAnyReviewerRunning]);
+  }, [isAnyReviewerRunning, isApproved]);
 
   // File watch for reload functionality - initialize with callback
   const { shouldReload, reload, watchState } = useFileWatch(
@@ -1075,7 +1086,7 @@ function App() {
 
   // Send comments to server whenever they change and before page unload
   useEffect(() => {
-    if (!hasBootstrappedComments) {
+    if (!hasBootstrappedComments || isApproved) {
       return;
     }
 
@@ -1107,7 +1118,7 @@ function App() {
     return () => {
       window.removeEventListener('beforeunload', sendCommentsBeforeUnload);
     };
-  }, [getCommentApiUrl, hasBootstrappedComments, syncThreadsToServer, threads]);
+  }, [getCommentApiUrl, hasBootstrappedComments, isApproved, syncThreadsToServer, threads]);
 
   // Establish SSE connection for tab close detection
   useEffect(() => {
@@ -1168,6 +1179,38 @@ function App() {
       setTimeout(() => setIsCopiedAll(false), 2000);
     } catch (error) {
       console.error('Failed to copy all comments prompt:', error);
+    }
+  };
+
+  const handleApprove = async () => {
+    if (
+      isAnyReviewerRunning &&
+      !window.confirm('AI reviewers are still running. Approve and end the review anyway?')
+    ) {
+      return;
+    }
+
+    setIsApproving(true);
+    setApproveError(null);
+    try {
+      const response = await fetch(getCommentApiUrl('/api/approve'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          threads,
+          baseVersion: serverCommentVersionRef.current ?? undefined,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText}`);
+      }
+      setIsApproved(true);
+      window.close();
+    } catch (approveFailure) {
+      console.error('Failed to approve review:', approveFailure);
+      setApproveError('Failed to approve. Please try again.');
+    } finally {
+      setIsApproving(false);
     }
   };
 
@@ -1327,6 +1370,15 @@ function App() {
       }
     });
   };
+
+  if (isApproved) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-github-bg-primary text-center gap-2">
+        <h2 className="text-github-accent text-2xl mb-2">Approved</h2>
+        <p className="text-github-text-secondary text-base">You can close this tab.</p>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -1539,6 +1591,24 @@ function App() {
                     )}
                   </code>
                 </span>
+              )}
+              {diffData.approveAvailable !== false && (
+                <div className="flex items-center gap-2">
+                  {approveError && (
+                    <span role="alert" className="text-xs text-github-danger">
+                      {approveError}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => void handleApprove()}
+                    disabled={isApproving}
+                    className="px-3 py-1.5 text-xs font-medium rounded bg-github-accent text-white hover:bg-github-accent/90 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    title="Approve and end the review"
+                  >
+                    <Check size={14} />
+                    Approve
+                  </button>
+                </div>
               )}
             </div>
           </div>

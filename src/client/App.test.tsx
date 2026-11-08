@@ -1275,6 +1275,109 @@ describe('App Component - Review extensions', () => {
   });
 });
 
+describe('App Component - Approve', () => {
+  const timestamp = '2024-01-01T00:00:00.000Z';
+  let approveResponse: { ok: boolean; status: number };
+  let reviewers: Array<{ name: string; status: string; updatedAt: string }>;
+
+  const getApproveCalls = () =>
+    vi
+      .mocked(global.fetch)
+      .mock.calls.filter(([url]) => String(url).startsWith('/api/approve')) as Array<
+      [string, RequestInit]
+    >;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockComments = [
+      createMockThread({ id: 'test-1', filePath: 'test.ts', line: 10, body: 'Nitpick' }),
+    ];
+    approveResponse = { ok: true, status: 200 };
+    reviewers = [];
+    vi.spyOn(window, 'close').mockImplementation(() => {});
+    vi.mocked(global.fetch).mockImplementation((input) => {
+      const path = String(input).split('?')[0] ?? '';
+      if (path === '/api/approve') {
+        return Promise.resolve({
+          ...approveResponse,
+          statusText: '',
+          json: async () => ({ success: approveResponse.ok }),
+        } as Response);
+      }
+      if (path === '/api/reviewers') {
+        return Promise.resolve({ ok: true, json: async () => ({ reviewers }) } as Response);
+      }
+      if (path === '/api/overview') {
+        return Promise.resolve({ ok: true, json: async () => ({ markdown: null }) } as Response);
+      }
+      if (path === '/api/revisions') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ specialOptions: [], branches: [], commits: [] }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, json: async () => mockDiffResponse } as Response);
+    });
+  });
+
+  afterEach(() => {
+    vi.mocked(window.close).mockRestore();
+  });
+
+  it('posts the threads and shows the approved state', async () => {
+    renderApp();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    expect(await screen.findByText('You can close this tab.')).toBeInTheDocument();
+    const approveCalls = getApproveCalls();
+    expect(approveCalls).toHaveLength(1);
+    const [url, request] = approveCalls[0]!;
+    expect(url).toBe('/api/approve?base=HEAD%5E&target=HEAD');
+    expect(request.method).toBe('POST');
+    expect(JSON.parse(String(request.body))).toEqual({
+      threads: [expect.objectContaining({ id: 'test-1' })],
+    });
+    expect(window.close).toHaveBeenCalled();
+
+    vi.mocked(navigator.sendBeacon).mockClear();
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(navigator.sendBeacon).not.toHaveBeenCalled();
+  });
+
+  it('asks for confirmation while AI reviewers are running', async () => {
+    reviewers = [{ name: 'security', status: 'running', updatedAt: timestamp }];
+    mockConfirm.mockReturnValue(false);
+    renderApp();
+
+    expect(await screen.findByText('Reviewing 0/1')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    expect(mockConfirm).toHaveBeenCalledTimes(1);
+    expect(getApproveCalls()).toHaveLength(0);
+
+    mockConfirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    expect(await screen.findByText('You can close this tab.')).toBeInTheDocument();
+    expect(getApproveCalls()).toHaveLength(1);
+  });
+
+  it('shows an error and keeps the review usable when approval fails', async () => {
+    approveResponse = { ok: false, status: 500 };
+    renderApp();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to approve');
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
+    expect(screen.queryByText('You can close this tab.')).not.toBeInTheDocument();
+    expect(window.close).not.toHaveBeenCalled();
+  });
+});
+
 describe('App Component - Symbol navigation', () => {
   const diffWithCode: DiffResponse = {
     ...mockDiffResponse,

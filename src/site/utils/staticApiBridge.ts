@@ -121,6 +121,7 @@ const buildDiffPayload = (diff: DiffResponse): DiffResponse => ({
   ...diff,
   clearComments: false,
   openInEditorAvailable: false,
+  approveAvailable: false,
 });
 
 export const installStaticApiBridge = (dataset: StaticDiffDataset): StaticApiBridge => {
