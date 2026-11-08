@@ -482,6 +482,7 @@ export async function startServer(
       ...responseDiffData,
       ignoreWhitespace,
       openInEditorAvailable: !options.stdinDiff,
+      approveAvailable: true,
       baseCommitish,
       targetCommitish,
       requestedBaseCommitish,
@@ -870,25 +871,31 @@ export async function startServer(
     }
   }
 
+  async function saveCommentsFromRequest(req: express.Request) {
+    const selection = getCommentSelectionFromQuery(req.query as Record<string, unknown>);
+    const body: unknown =
+      typeof req.body === 'string' ? (JSON.parse(req.body) as unknown) : req.body;
+    const nextThreads = parseCommentsPayload(body);
+    const baseVersion = parseBaseVersion(body);
+    const session = getOrCreateCommentSession(selection);
+
+    // Stale baseVersion means another writer (e.g. an agent) changed comments since the
+    // client's last read, so merge rather than overwrite. A matching/absent version replaces.
+    const isStale = typeof baseVersion === 'number' && baseVersion !== session.version;
+    const resolvedThreads = isStale
+      ? mergeCommentThreads(session.threads, nextThreads).threads
+      : nextThreads;
+    const previousThreads = session.threads;
+
+    updateCommentSession(selection, resolvedThreads);
+    await persistFindingDecisions(previousThreads, resolvedThreads);
+
+    return { session, isStale };
+  }
+
   app.post('/api/comments', async (req, res) => {
     try {
-      const selection = getCommentSelectionFromQuery(req.query as Record<string, unknown>);
-      const body: unknown =
-        typeof req.body === 'string' ? (JSON.parse(req.body) as unknown) : req.body;
-      const nextThreads = parseCommentsPayload(body);
-      const baseVersion = parseBaseVersion(body);
-      const session = getOrCreateCommentSession(selection);
-
-      // Stale baseVersion means another writer (e.g. an agent) changed comments since the
-      // client's last read, so merge rather than overwrite. A matching/absent version replaces.
-      const isStale = typeof baseVersion === 'number' && baseVersion !== session.version;
-      const resolvedThreads = isStale
-        ? mergeCommentThreads(session.threads, nextThreads).threads
-        : nextThreads;
-      const previousThreads = session.threads;
-
-      updateCommentSession(selection, resolvedThreads);
-      await persistFindingDecisions(previousThreads, resolvedThreads);
+      const { session, isStale } = await saveCommentsFromRequest(req);
 
       res.json({
         success: true,
@@ -1245,7 +1252,6 @@ export async function startServer(
     res.json({ success: true });
   });
 
-  // Function to output comments when server shuts down
   function outputFinalComments() {
     const session = getOrCreateCommentSession(currentCommentSelection);
     const outputThreads = selectThreadsForOutput(session.threads);
@@ -1253,6 +1259,41 @@ export async function startServer(
       console.log(formatCommentsOutput(outputThreads.map(toCommentThread)));
     }
   }
+
+  let isShuttingDown = false;
+
+  function scheduleShutdown(reason: string, { approved }: { approved: boolean }): boolean {
+    if (isShuttingDown) {
+      return false;
+    }
+    isShuttingDown = true;
+    // Delay so the HTTP response and any pending sendBeacon requests are processed first.
+    setTimeout(async () => {
+      console.log(reason);
+      await Promise.all([fileWatcher.stop(), lspManager.shutdown()]);
+      outputFinalComments();
+      if (approved) {
+        console.log('✅ Approved');
+      }
+      process.exit(0);
+    }, 100);
+    return true;
+  }
+
+  app.post('/api/approve', async (req, res) => {
+    try {
+      await saveCommentsFromRequest(req);
+    } catch (error) {
+      console.error('Error parsing comments:', error);
+      res.status(400).json({ error: 'Invalid comment data' });
+      return;
+    }
+    if (!scheduleShutdown('Review approved, shutting down server...', { approved: true })) {
+      res.status(409).json({ error: 'Server is already shutting down' });
+      return;
+    }
+    res.json({ success: true });
+  });
 
   // SSE endpoint for file watching
   app.get('/api/watch', (req, res) => {
@@ -1290,21 +1331,14 @@ export async function startServer(
     // When client disconnects (tab closed, navigation, etc.)
     req.on('close', () => {
       clearInterval(heartbeatInterval);
+      if (isShuttingDown) {
+        return;
+      }
       if (options.keepAlive) {
         console.log('Client disconnected, but server is staying alive (--keep-alive)');
         console.log('Press Ctrl+C to stop the server');
       } else {
-        // Add a small delay to ensure any pending sendBeacon requests are processed
-        setTimeout(async () => {
-          console.log('Client disconnected, shutting down server...');
-
-          // Stop file watcher
-          await fileWatcher.stop();
-          await lspManager.shutdown();
-
-          outputFinalComments();
-          process.exit(0);
-        }, 100);
+        scheduleShutdown('Client disconnected, shutting down server...', { approved: false });
       }
     });
   });

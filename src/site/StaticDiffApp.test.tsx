@@ -206,6 +206,20 @@ describe('StaticDiffApp', () => {
     expect(data.openInEditorAvailable).toBe(false);
   });
 
+  it('hides the Approve button in static snapshot mode', async () => {
+    render(
+      <HotkeysProvider initiallyActiveScopes={['navigation']}>
+        <StaticDiffApp />
+      </HotkeysProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('src/first.ts')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+  });
+
   it('serves static blob content for preview-backed viewers', async () => {
     render(
       <HotkeysProvider initiallyActiveScopes={['navigation']}>

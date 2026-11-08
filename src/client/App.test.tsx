@@ -1113,6 +1113,34 @@ describe('App Component - Mobile sidebar auto-close', () => {
   });
 });
 
+const mockReviewFetch = (
+  routes: Record<string, unknown>,
+  failingRoutes: Record<string, number> = {},
+) => {
+  vi.mocked(global.fetch).mockImplementation((input) => {
+    const path = String(input).split('?')[0] ?? '';
+    const failingStatus = failingRoutes[path];
+    if (failingStatus !== undefined) {
+      return Promise.resolve({
+        ok: false,
+        status: failingStatus,
+        statusText: '',
+        json: async () => ({}),
+      } as Response);
+    }
+    if (path in routes) {
+      return Promise.resolve({ ok: true, json: async () => routes[path] } as Response);
+    }
+    if (path === '/api/revisions') {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ specialOptions: [], branches: [], commits: [] }),
+      } as Response);
+    }
+    return Promise.resolve({ ok: true, json: async () => mockDiffResponse } as Response);
+  });
+};
+
 describe('App Component - Review extensions', () => {
   const timestamp = '2024-01-01T00:00:00.000Z';
 
@@ -1123,22 +1151,6 @@ describe('App Component - Review extensions', () => {
     ...createMockThread({ id, filePath: 'test.ts', line: 3, body: `Body ${id}`, author: 'AI' }),
     ...review,
   });
-
-  const mockReviewFetch = (routes: Record<string, unknown>) => {
-    vi.mocked(global.fetch).mockImplementation((input) => {
-      const path = String(input).split('?')[0] ?? '';
-      if (path in routes) {
-        return Promise.resolve({ ok: true, json: async () => routes[path] } as Response);
-      }
-      if (path === '/api/revisions') {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ specialOptions: [], branches: [], commits: [] }),
-        } as Response);
-      }
-      return Promise.resolve({ ok: true, json: async () => mockDiffResponse } as Response);
-    });
-  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1272,6 +1284,101 @@ describe('App Component - Review extensions', () => {
         }),
       ]);
     });
+  });
+});
+
+describe('App Component - Approve', () => {
+  const timestamp = '2024-01-01T00:00:00.000Z';
+  let unloadOnClose: Array<{ prompted: boolean; beaconSent: boolean }>;
+
+  const getApproveCalls = () =>
+    vi
+      .mocked(global.fetch)
+      .mock.calls.filter(([url]) => String(url).startsWith('/api/approve')) as Array<
+      [string, RequestInit]
+    >;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockComments = [
+      createMockThread({ id: 'test-1', filePath: 'test.ts', line: 10, body: 'Nitpick' }),
+    ];
+    unloadOnClose = [];
+    vi.spyOn(window, 'close').mockImplementation(() => {
+      vi.mocked(navigator.sendBeacon).mockClear();
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      unloadOnClose.push({
+        prompted: event.defaultPrevented,
+        beaconSent: vi.mocked(navigator.sendBeacon).mock.calls.length > 0,
+      });
+    });
+    mockReviewFetch({
+      '/api/overview': { markdown: null },
+      '/api/reviewers': { reviewers: [] },
+      '/api/approve': { success: true },
+    });
+  });
+
+  afterEach(() => {
+    vi.mocked(window.close).mockRestore();
+  });
+
+  it('posts the threads and shows the approved state', async () => {
+    renderApp();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    expect(await screen.findByText('You can close this tab.')).toBeInTheDocument();
+    const approveCalls = getApproveCalls();
+    expect(approveCalls).toHaveLength(1);
+    const [url, request] = approveCalls[0]!;
+    expect(url).toBe('/api/approve?base=HEAD%5E&target=HEAD');
+    expect(request.method).toBe('POST');
+    expect(JSON.parse(String(request.body))).toEqual({
+      threads: [expect.objectContaining({ id: 'test-1' })],
+    });
+    expect(unloadOnClose).toEqual([{ prompted: false, beaconSent: false }]);
+  });
+
+  it('asks for confirmation while AI reviewers are running', async () => {
+    mockReviewFetch({
+      '/api/overview': { markdown: null },
+      '/api/reviewers': {
+        reviewers: [{ name: 'security', status: 'running', updatedAt: timestamp }],
+      },
+      '/api/approve': { success: true },
+    });
+    mockConfirm.mockReturnValue(false);
+    renderApp();
+
+    expect(await screen.findByText('Reviewing 0/1')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    expect(mockConfirm).toHaveBeenCalledTimes(1);
+    expect(getApproveCalls()).toHaveLength(0);
+
+    mockConfirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    expect(await screen.findByText('You can close this tab.')).toBeInTheDocument();
+    expect(getApproveCalls()).toHaveLength(1);
+    expect(unloadOnClose).toEqual([{ prompted: false, beaconSent: false }]);
+  });
+
+  it('shows an error and keeps the review usable when approval fails', async () => {
+    mockReviewFetch(
+      { '/api/overview': { markdown: null }, '/api/reviewers': { reviewers: [] } },
+      { '/api/approve': 500 },
+    );
+    renderApp();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to approve');
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
+    expect(screen.queryByText('You can close this tab.')).not.toBeInTheDocument();
+    expect(window.close).not.toHaveBeenCalled();
   });
 });
 

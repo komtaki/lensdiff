@@ -52,6 +52,7 @@ export interface DiffResponse {
   ignoreWhitespace?: boolean;
   isEmpty?: boolean;
   openInEditorAvailable?: boolean;
+  approveAvailable?: boolean;
   baseCommitish?: string;
   targetCommitish?: string;
   requestedBaseCommitish?: string;
