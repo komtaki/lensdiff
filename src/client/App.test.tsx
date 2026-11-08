@@ -1113,6 +1113,34 @@ describe('App Component - Mobile sidebar auto-close', () => {
   });
 });
 
+const mockReviewFetch = (
+  routes: Record<string, unknown>,
+  failingRoutes: Record<string, number> = {},
+) => {
+  vi.mocked(global.fetch).mockImplementation((input) => {
+    const path = String(input).split('?')[0] ?? '';
+    const failingStatus = failingRoutes[path];
+    if (failingStatus !== undefined) {
+      return Promise.resolve({
+        ok: false,
+        status: failingStatus,
+        statusText: '',
+        json: async () => ({}),
+      } as Response);
+    }
+    if (path in routes) {
+      return Promise.resolve({ ok: true, json: async () => routes[path] } as Response);
+    }
+    if (path === '/api/revisions') {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ specialOptions: [], branches: [], commits: [] }),
+      } as Response);
+    }
+    return Promise.resolve({ ok: true, json: async () => mockDiffResponse } as Response);
+  });
+};
+
 describe('App Component - Review extensions', () => {
   const timestamp = '2024-01-01T00:00:00.000Z';
 
@@ -1123,22 +1151,6 @@ describe('App Component - Review extensions', () => {
     ...createMockThread({ id, filePath: 'test.ts', line: 3, body: `Body ${id}`, author: 'AI' }),
     ...review,
   });
-
-  const mockReviewFetch = (routes: Record<string, unknown>) => {
-    vi.mocked(global.fetch).mockImplementation((input) => {
-      const path = String(input).split('?')[0] ?? '';
-      if (path in routes) {
-        return Promise.resolve({ ok: true, json: async () => routes[path] } as Response);
-      }
-      if (path === '/api/revisions') {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ specialOptions: [], branches: [], commits: [] }),
-        } as Response);
-      }
-      return Promise.resolve({ ok: true, json: async () => mockDiffResponse } as Response);
-    });
-  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1277,8 +1289,6 @@ describe('App Component - Review extensions', () => {
 
 describe('App Component - Approve', () => {
   const timestamp = '2024-01-01T00:00:00.000Z';
-  let approveResponse: { ok: boolean; status: number };
-  let reviewers: Array<{ name: string; status: string; updatedAt: string }>;
   let unloadOnClose: Array<{ prompted: boolean; beaconSent: boolean }>;
 
   const getApproveCalls = () =>
@@ -1293,8 +1303,6 @@ describe('App Component - Approve', () => {
     mockComments = [
       createMockThread({ id: 'test-1', filePath: 'test.ts', line: 10, body: 'Nitpick' }),
     ];
-    approveResponse = { ok: true, status: 200 };
-    reviewers = [];
     unloadOnClose = [];
     vi.spyOn(window, 'close').mockImplementation(() => {
       vi.mocked(navigator.sendBeacon).mockClear();
@@ -1305,28 +1313,10 @@ describe('App Component - Approve', () => {
         beaconSent: vi.mocked(navigator.sendBeacon).mock.calls.length > 0,
       });
     });
-    vi.mocked(global.fetch).mockImplementation((input) => {
-      const path = String(input).split('?')[0] ?? '';
-      if (path === '/api/approve') {
-        return Promise.resolve({
-          ...approveResponse,
-          statusText: '',
-          json: async () => ({ success: approveResponse.ok }),
-        } as Response);
-      }
-      if (path === '/api/reviewers') {
-        return Promise.resolve({ ok: true, json: async () => ({ reviewers }) } as Response);
-      }
-      if (path === '/api/overview') {
-        return Promise.resolve({ ok: true, json: async () => ({ markdown: null }) } as Response);
-      }
-      if (path === '/api/revisions') {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ specialOptions: [], branches: [], commits: [] }),
-        } as Response);
-      }
-      return Promise.resolve({ ok: true, json: async () => mockDiffResponse } as Response);
+    mockReviewFetch({
+      '/api/overview': { markdown: null },
+      '/api/reviewers': { reviewers: [] },
+      '/api/approve': { success: true },
     });
   });
 
@@ -1352,7 +1342,13 @@ describe('App Component - Approve', () => {
   });
 
   it('asks for confirmation while AI reviewers are running', async () => {
-    reviewers = [{ name: 'security', status: 'running', updatedAt: timestamp }];
+    mockReviewFetch({
+      '/api/overview': { markdown: null },
+      '/api/reviewers': {
+        reviewers: [{ name: 'security', status: 'running', updatedAt: timestamp }],
+      },
+      '/api/approve': { success: true },
+    });
     mockConfirm.mockReturnValue(false);
     renderApp();
 
@@ -1371,7 +1367,10 @@ describe('App Component - Approve', () => {
   });
 
   it('shows an error and keeps the review usable when approval fails', async () => {
-    approveResponse = { ok: false, status: 500 };
+    mockReviewFetch(
+      { '/api/overview': { markdown: null }, '/api/reviewers': { reviewers: [] } },
+      { '/api/approve': 500 },
+    );
     renderApp();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));

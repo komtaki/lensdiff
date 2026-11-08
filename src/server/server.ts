@@ -1270,8 +1270,7 @@ export async function startServer(
     // Delay so the HTTP response and any pending sendBeacon requests are processed first.
     setTimeout(async () => {
       console.log(reason);
-      await fileWatcher.stop();
-      await lspManager.shutdown();
+      await Promise.all([fileWatcher.stop(), lspManager.shutdown()]);
       outputFinalComments();
       if (approved) {
         console.log('✅ Approved');

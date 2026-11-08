@@ -181,9 +181,10 @@ function App() {
   const [hasTriggeredSparkles, setHasTriggeredSparkles] = useState(false);
   const [isCommentsListOpen, setIsCommentsListOpen] = useState(false);
   const [isRevisionModalOpen, setIsRevisionModalOpen] = useState(false);
-  const [isApproving, setIsApproving] = useState(false);
-  const [isApproved, setIsApproved] = useState(false);
-  const [approveError, setApproveError] = useState<string | null>(null);
+  const [approveStatus, setApproveStatus] = useState<'idle' | 'pending' | 'approved' | 'failed'>(
+    'idle',
+  );
+  const isApproved = approveStatus === 'approved';
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const collapsedInitializedRef = useRef(false);
   const diffScrollContainerRef = useRef<HTMLElement | null>(null);
@@ -310,15 +311,21 @@ function App() {
     return Array.isArray(payload.threads) ? payload.threads : [];
   }, [getCommentApiUrl]);
 
+  const serializeCommentsPayload = useCallback(
+    (nextThreads: DiffCommentThread[]) =>
+      JSON.stringify({
+        threads: nextThreads,
+        baseVersion: serverCommentVersionRef.current ?? undefined,
+      }),
+    [],
+  );
+
   const syncThreadsToServer = useCallback(
     async (nextThreads: DiffCommentThread[]) => {
       const response = await fetch(getCommentApiUrl('/api/comments'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          threads: nextThreads,
-          baseVersion: serverCommentVersionRef.current ?? undefined,
-        }),
+        body: serializeCommentsPayload(nextThreads),
       });
       if (!response.ok) {
         return;
@@ -338,7 +345,7 @@ function App() {
         replaceThreads(result.threads);
       }
     },
-    [getCommentApiUrl, replaceThreads],
+    [getCommentApiUrl, replaceThreads, serializeCommentsPayload],
   );
 
   // Viewed files management
@@ -1094,10 +1101,7 @@ function App() {
       return;
     }
 
-    const data = JSON.stringify({
-      threads,
-      baseVersion: serverCommentVersionRef.current ?? undefined,
-    });
+    const data = serializeCommentsPayload(threads);
     const commentsApiUrl = getCommentApiUrl('/api/comments');
 
     // Also handle page unload
@@ -1122,7 +1126,14 @@ function App() {
     return () => {
       window.removeEventListener('beforeunload', sendCommentsBeforeUnload);
     };
-  }, [getCommentApiUrl, hasBootstrappedComments, isApproved, syncThreadsToServer, threads]);
+  }, [
+    getCommentApiUrl,
+    hasBootstrappedComments,
+    isApproved,
+    serializeCommentsPayload,
+    syncThreadsToServer,
+    threads,
+  ]);
 
   // Establish SSE connection for tab close detection
   useEffect(() => {
@@ -1194,26 +1205,20 @@ function App() {
       return;
     }
 
-    setIsApproving(true);
-    setApproveError(null);
+    setApproveStatus('pending');
     try {
       const response = await fetch(getCommentApiUrl('/api/approve'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          threads,
-          baseVersion: serverCommentVersionRef.current ?? undefined,
-        }),
+        body: serializeCommentsPayload(threads),
       });
       if (!response.ok) {
         throw new Error(`${response.status} ${response.statusText}`);
       }
-      setIsApproved(true);
+      setApproveStatus('approved');
     } catch (approveFailure) {
       console.error('Failed to approve review:', approveFailure);
-      setApproveError('Failed to approve. Please try again.');
-    } finally {
-      setIsApproving(false);
+      setApproveStatus('failed');
     }
   };
 
@@ -1597,14 +1602,14 @@ function App() {
               )}
               {diffData.approveAvailable !== false && (
                 <div className="flex items-center gap-2">
-                  {approveError && (
+                  {approveStatus === 'failed' && (
                     <span role="alert" className="text-xs text-github-danger">
-                      {approveError}
+                      Failed to approve. Please try again.
                     </span>
                   )}
                   <button
                     onClick={() => void handleApprove()}
-                    disabled={isApproving}
+                    disabled={approveStatus === 'pending'}
                     className="px-3 py-1.5 text-xs font-medium rounded bg-github-accent text-white hover:bg-github-accent/90 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                     title="Approve and end the review"
                   >

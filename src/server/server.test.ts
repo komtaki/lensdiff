@@ -1955,7 +1955,7 @@ describe('Server Integration Tests', () => {
         expect(await response.json()).toEqual({ success: true });
 
         controller.abort();
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        await vi.waitFor(() => expect(process.exit).toHaveBeenCalled());
 
         const output = logSpy.mock.calls.map((args) => args.join(' '));
         const commentOutputs = output.filter((line) => line.includes('src/App.tsx:L10'));
