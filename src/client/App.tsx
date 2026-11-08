@@ -652,6 +652,10 @@ function App() {
     return () => window.removeEventListener('beforeunload', confirmLeaveWhileReviewing);
   }, [isAnyReviewerRunning, isApproved]);
 
+  useEffect(() => {
+    if (isApproved) window.close();
+  }, [isApproved]);
+
   // File watch for reload functionality - initialize with callback
   const { shouldReload, reload, watchState } = useFileWatch(
     handleWatchReload,
@@ -1205,7 +1209,6 @@ function App() {
         throw new Error(`${response.status} ${response.statusText}`);
       }
       setIsApproved(true);
-      window.close();
     } catch (approveFailure) {
       console.error('Failed to approve review:', approveFailure);
       setApproveError('Failed to approve. Please try again.');

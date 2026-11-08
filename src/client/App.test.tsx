@@ -1279,6 +1279,7 @@ describe('App Component - Approve', () => {
   const timestamp = '2024-01-01T00:00:00.000Z';
   let approveResponse: { ok: boolean; status: number };
   let reviewers: Array<{ name: string; status: string; updatedAt: string }>;
+  let unloadOnClose: Array<{ prompted: boolean; beaconSent: boolean }>;
 
   const getApproveCalls = () =>
     vi
@@ -1294,7 +1295,16 @@ describe('App Component - Approve', () => {
     ];
     approveResponse = { ok: true, status: 200 };
     reviewers = [];
-    vi.spyOn(window, 'close').mockImplementation(() => {});
+    unloadOnClose = [];
+    vi.spyOn(window, 'close').mockImplementation(() => {
+      vi.mocked(navigator.sendBeacon).mockClear();
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      unloadOnClose.push({
+        prompted: event.defaultPrevented,
+        beaconSent: vi.mocked(navigator.sendBeacon).mock.calls.length > 0,
+      });
+    });
     vi.mocked(global.fetch).mockImplementation((input) => {
       const path = String(input).split('?')[0] ?? '';
       if (path === '/api/approve') {
@@ -1338,13 +1348,7 @@ describe('App Component - Approve', () => {
     expect(JSON.parse(String(request.body))).toEqual({
       threads: [expect.objectContaining({ id: 'test-1' })],
     });
-    expect(window.close).toHaveBeenCalled();
-
-    vi.mocked(navigator.sendBeacon).mockClear();
-    const event = new Event('beforeunload', { cancelable: true });
-    window.dispatchEvent(event);
-    expect(event.defaultPrevented).toBe(false);
-    expect(navigator.sendBeacon).not.toHaveBeenCalled();
+    expect(unloadOnClose).toEqual([{ prompted: false, beaconSent: false }]);
   });
 
   it('asks for confirmation while AI reviewers are running', async () => {
@@ -1363,6 +1367,7 @@ describe('App Component - Approve', () => {
 
     expect(await screen.findByText('You can close this tab.')).toBeInTheDocument();
     expect(getApproveCalls()).toHaveLength(1);
+    expect(unloadOnClose).toEqual([{ prompted: false, beaconSent: false }]);
   });
 
   it('shows an error and keeps the review usable when approval fails', async () => {
