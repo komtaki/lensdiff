@@ -1531,6 +1531,26 @@ index abc123..def456 100644
       });
     });
 
+    it('expands full context to the whole file', async () => {
+      const gitDiff = (parser as any).git.diff;
+      const gitRevparse = (parser as any).git.revparse;
+
+      gitRevparse
+        .mockResolvedValueOnce('1234567890abcdef1234567890abcdef12345678')
+        .mockResolvedValueOnce('abcdef1234567890abcdef1234567890abcdef12');
+      gitDiff.mockResolvedValue('');
+
+      await parser.parseDiff({ targetCommitish: 'HEAD', baseCommitish: 'HEAD~1' }, false, 'full');
+
+      expect(gitDiff).toHaveBeenCalledWith([
+        'abcdef1234567890abcdef1234567890abcdef12',
+        '1234567890abcdef1234567890abcdef12345678',
+        '-U1000000000',
+        '--no-ext-diff',
+        '--color=never',
+      ]);
+    });
+
     it('accepts branch refs with revision suffixes', async () => {
       const gitDiff = (parser as any).git.diff;
       const gitRevparse = (parser as any).git.revparse;
