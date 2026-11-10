@@ -12,6 +12,7 @@ import App from './App';
 import { useDiffComments } from './hooks/useDiffComments';
 import { useViewedFiles } from './hooks/useViewedFiles';
 import { useViewport } from './hooks/useViewport';
+import { resetClientSettingsForTests } from './services/userSettings';
 
 // Mock the useViewport hook
 vi.mock('./hooks/useViewport', () => ({
@@ -1089,8 +1090,25 @@ describe('App Component - Show full file toggle', () => {
       .mock.calls.map(([url]) => url)
       .filter((url): url is string => typeof url === 'string' && url.startsWith('/api/diff'));
 
+  const mockUserSettings = (client: Record<string, unknown>) => {
+    const putBodies: any[] = [];
+    const fetchDiff = (global.fetch as any).getMockImplementation();
+    (global.fetch as any).mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/api/user-settings') && init?.method === 'PUT') {
+        putBodies.push(JSON.parse(String(init.body)));
+        return Promise.resolve({ ok: true, json: async () => ({}) });
+      }
+      if (url.includes('/api/user-settings')) {
+        return Promise.resolve({ ok: true, json: async () => ({ version: 1, client }) });
+      }
+      return fetchDiff(url, init);
+    });
+    return putBodies;
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
+    resetClientSettingsForTests();
     mockComments = [];
     mockConfirm.mockReturnValue(false);
     vi.mocked(useViewport).mockReturnValue({ isMobile: false, isDesktop: true });
@@ -1107,6 +1125,8 @@ describe('App Component - Show full file toggle', () => {
   });
 
   it('refetches with collapsed context and persists the choice when unchecked', async () => {
+    const putBodies = mockUserSettings({});
+
     renderApp();
 
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Show Full File' }));
@@ -1115,6 +1135,9 @@ describe('App Component - Show full file toggle', () => {
       expect(getDiffRequestUrls().at(-1)).toContain('showFullFile=false');
     });
     expect(window.localStorage.getItem('difit.showFullFile')).toBe('false');
+    await waitFor(() => {
+      expect(putBodies.at(-1)?.client).toMatchObject({ showFullFile: false });
+    });
   });
 
   it('restores the collapsed choice from localStorage', async () => {
@@ -1125,6 +1148,30 @@ describe('App Component - Show full file toggle', () => {
     expect(await screen.findByRole('checkbox', { name: 'Show Full File' })).not.toBeChecked();
     await waitFor(() => {
       expect(getDiffRequestUrls()[0]).toContain('showFullFile=false');
+    });
+  });
+
+  it('hydrates the collapsed choice from the server settings', async () => {
+    mockUserSettings({ showFullFile: false });
+
+    renderApp();
+
+    await waitFor(() => {
+      expect(screen.getByRole('checkbox', { name: 'Show Full File' })).not.toBeChecked();
+    });
+    await waitFor(() => {
+      expect(getDiffRequestUrls().at(-1)).toContain('showFullFile=false');
+    });
+  });
+
+  it('seeds the server with the localStorage choice when the server has none', async () => {
+    window.localStorage.setItem('difit.showFullFile', 'false');
+    const putBodies = mockUserSettings({});
+
+    renderApp();
+
+    await waitFor(() => {
+      expect(putBodies.at(-1)?.client).toMatchObject({ showFullFile: false });
     });
   });
 });
