@@ -1082,6 +1082,53 @@ describe('App Component - Sidebar persistence', () => {
   });
 });
 
+describe('App Component - Show full file toggle', () => {
+  const getDiffRequestUrls = () =>
+    vi
+      .mocked(global.fetch)
+      .mock.calls.map(([url]) => url)
+      .filter((url): url is string => typeof url === 'string' && url.startsWith('/api/diff'));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockComments = [];
+    mockConfirm.mockReturnValue(false);
+    vi.mocked(useViewport).mockReturnValue({ isMobile: false, isDesktop: true });
+    mockFetch(mockDiffResponse);
+  });
+
+  it('requests the full file by default', async () => {
+    renderApp();
+
+    expect(await screen.findByRole('checkbox', { name: 'Show Full File' })).toBeChecked();
+    await waitFor(() => {
+      expect(getDiffRequestUrls()[0]).toContain('showFullFile=true');
+    });
+  });
+
+  it('refetches with collapsed context and persists the choice when unchecked', async () => {
+    renderApp();
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Show Full File' }));
+
+    await waitFor(() => {
+      expect(getDiffRequestUrls().at(-1)).toContain('showFullFile=false');
+    });
+    expect(window.localStorage.getItem('difit.showFullFile')).toBe('false');
+  });
+
+  it('restores the collapsed choice from localStorage', async () => {
+    window.localStorage.setItem('difit.showFullFile', 'false');
+
+    renderApp();
+
+    expect(await screen.findByRole('checkbox', { name: 'Show Full File' })).not.toBeChecked();
+    await waitFor(() => {
+      expect(getDiffRequestUrls()[0]).toContain('showFullFile=false');
+    });
+  });
+});
+
 describe('App Component - Mobile sidebar auto-close', () => {
   beforeEach(() => {
     vi.clearAllMocks();

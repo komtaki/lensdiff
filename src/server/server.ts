@@ -33,7 +33,7 @@ import {
   syncFindingDecisions,
 } from './decision-store.js';
 import { FileWatcherService } from './file-watcher.js';
-import { GitDiffParser } from './git-diff.js';
+import { GitDiffParser, type DiffContextLines } from './git-diff.js';
 import { LspRequestTimeoutError } from './lsp/lsp-client.js';
 import {
   createLspManager,
@@ -85,8 +85,12 @@ const GENERATED_STATUS_CACHE_TTL_MS = 60_000;
 const LSP_TARGET_COMMITISHES = new Set(['HEAD', 'working', '.']);
 const MAX_DIFF_CACHE_ENTRIES = 8;
 
-function createDiffCacheKey(selection: DiffSelection, ignoreWhitespace: boolean) {
-  return `${getDiffSelectionKey(selection)}\u0000${ignoreWhitespace ? '1' : '0'}`;
+function createDiffCacheKey(
+  selection: DiffSelection,
+  ignoreWhitespace: boolean,
+  contextLines: DiffContextLines | undefined,
+) {
+  return `${getDiffSelectionKey(selection)}\u0000${ignoreWhitespace ? '1' : '0'}\u0000${contextLines ?? ''}`;
 }
 
 function getCachedDiffResponse(
@@ -198,6 +202,8 @@ export async function startServer(
   >();
   const diffDataCache = new Map<string, DiffResponse>();
   const initialIgnoreWhitespace = options.ignoreWhitespace || false;
+  const resolveContextLines = (showFullFile: boolean): DiffContextLines | undefined =>
+    showFullFile ? 'full' : options.contextLines;
   const parseBaseMode = (value: unknown): BaseMode | undefined => {
     if (value === 'merge-base') {
       return 'merge-base';
@@ -230,14 +236,16 @@ export async function startServer(
     // Parse stdin diff directly
     initialDiffData = parser.parseStdinDiff(options.stdinDiff);
   } else {
+    const { client } = await readUserConfig();
+    const initialContextLines = resolveContextLines(client.showFullFile !== false);
     initialDiffData = await parser.parseDiff(
       initialSelection,
       initialIgnoreWhitespace,
-      options.contextLines,
+      initialContextLines,
     );
     setCachedDiffResponse(
       diffDataCache,
-      createDiffCacheKey(initialSelection, initialIgnoreWhitespace),
+      createDiffCacheKey(initialSelection, initialIgnoreWhitespace, initialContextLines),
       initialDiffData,
     );
   }
@@ -416,6 +424,7 @@ export async function startServer(
 
   app.get('/api/diff', async (req, res) => {
     const ignoreWhitespace = req.query.ignoreWhitespace === 'true';
+    const contextLines = resolveContextLines(req.query.showFullFile === 'true');
     const hasBase = typeof req.query.base === 'string';
     const hasTarget = typeof req.query.target === 'string';
     const hasBaseMode = typeof req.query.baseMode === 'string';
@@ -434,7 +443,7 @@ export async function startServer(
 
     let responseDiffData = initialDiffData;
     if (!options.stdinDiff) {
-      const cacheKey = createDiffCacheKey(requestedSelection, ignoreWhitespace);
+      const cacheKey = createDiffCacheKey(requestedSelection, ignoreWhitespace, contextLines);
       const cached = getCachedDiffResponse(diffDataCache, cacheKey);
       if (cached) {
         responseDiffData = cached;
@@ -443,7 +452,7 @@ export async function startServer(
           responseDiffData = await parser.parseDiff(
             requestedSelection,
             ignoreWhitespace,
-            options.contextLines,
+            contextLines,
           );
         } catch (error) {
           console.error('Error fetching diff:', error);

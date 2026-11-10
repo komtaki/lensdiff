@@ -92,6 +92,7 @@ const EMPTY_MERGED_CHUNKS: MergedChunk[] = [];
 const DIFF_VIEW_MODE_STORAGE_KEY = 'difit.diffViewMode';
 const SIDEBAR_WIDTH_STORAGE_KEY = 'difit.sidebarWidth';
 const SIDEBAR_OPEN_STORAGE_KEY = 'difit.sidebarOpen';
+const SHOW_FULL_FILE_STORAGE_KEY = 'difit.showFullFile';
 const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_MAX_WIDTH = 600;
 const SIDEBAR_DEFAULT_WIDTH = 280;
@@ -148,27 +149,35 @@ const getStoredSidebarWidth = (): number | null => {
 
 const getInitialSidebarWidth = () => getStoredSidebarWidth() ?? SIDEBAR_DEFAULT_WIDTH;
 
-const getStoredSidebarOpen = (): boolean | null => {
+const getStoredBoolean = (key: string): boolean | null => {
   if (typeof window === 'undefined') {
     return null;
   }
-  const stored = window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY);
-  if (stored === 'true') {
-    return true;
-  }
-  if (stored === 'false') {
-    return false;
+
+  try {
+    const stored = window.localStorage.getItem(key);
+    if (stored === 'true') {
+      return true;
+    }
+    if (stored === 'false') {
+      return false;
+    }
+  } catch {
+    // Ignore localStorage errors (e.g. disabled storage).
   }
   return null;
 };
 
-const getInitialFileTreeOpen = () => getStoredSidebarOpen() ?? true;
+const getInitialFileTreeOpen = () => getStoredBoolean(SIDEBAR_OPEN_STORAGE_KEY) ?? true;
+
+const getInitialShowFullFile = () => getStoredBoolean(SHOW_FULL_FILE_STORAGE_KEY) ?? true;
 
 function App() {
   const [diffData, setDiffData] = useState<DiffResponse | null>(null);
   const [diffDataVersion, setDiffDataVersion] = useState(0);
   const [diffMode, setDiffMode] = useState<DiffViewMode>(getInitialDiffViewMode);
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(true);
+  const [showFullFile, setShowFullFile] = useState(getInitialShowFullFile);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isCopiedAll, setIsCopiedAll] = useState(false);
@@ -501,6 +510,16 @@ function App() {
     saveClientSettings({ diffViewMode: mode });
   }, []);
 
+  const handleShowFullFileChange = useCallback((nextShowFullFile: boolean) => {
+    setShowFullFile(nextShowFullFile);
+    try {
+      window.localStorage.setItem(SHOW_FULL_FILE_STORAGE_KEY, String(nextShowFullFile));
+    } catch {
+      // Ignore localStorage errors (e.g. disabled storage).
+    }
+    saveClientSettings({ showFullFile: nextShowFullFile });
+  }, []);
+
   // Lift expand state to App level so navigation and rendering share the same merged chunks
   const {
     isLoading: isExpandLoading,
@@ -802,6 +821,7 @@ function App() {
           (hasUserSelectedRevisionRef.current ? selectedRevisionRef.current : undefined);
         const params = new URLSearchParams({
           ignoreWhitespace: String(ignoreWhitespace),
+          showFullFile: String(showFullFile),
         });
         if (requestedSelection?.baseCommitish) params.set('base', requestedSelection.baseCommitish);
         if (requestedSelection?.targetCommitish)
@@ -854,7 +874,7 @@ function App() {
         }
       }
     },
-    [ignoreWhitespace],
+    [ignoreWhitespace, showFullFile],
   );
   fetchDiffDataRef.current = fetchDiffData;
 
@@ -909,9 +929,18 @@ function App() {
       if (typeof client.sidebarOpen === 'boolean') {
         setIsFileTreeOpen(client.sidebarOpen);
       } else {
-        const localSidebarOpen = getStoredSidebarOpen();
+        const localSidebarOpen = getStoredBoolean(SIDEBAR_OPEN_STORAGE_KEY);
         if (localSidebarOpen !== null) {
           seed.sidebarOpen = localSidebarOpen;
+        }
+      }
+
+      if (typeof client.showFullFile === 'boolean') {
+        setShowFullFile(client.showFullFile);
+      } else {
+        const localShowFullFile = getStoredBoolean(SHOW_FULL_FILE_STORAGE_KEY);
+        if (localShowFullFile !== null) {
+          seed.showFullFile = localShowFullFile;
         }
       }
 
@@ -1514,6 +1543,12 @@ function App() {
                 onChange={setIgnoreWhitespace}
                 label="Ignore Whitespace"
                 title={ignoreWhitespace ? 'Show whitespace changes' : 'Ignore whitespace changes'}
+              />
+              <Checkbox
+                checked={showFullFile}
+                onChange={handleShowFullFileChange}
+                label="Show Full File"
+                title={showFullFile ? 'Collapse unchanged lines' : 'Show full file'}
               />
               {/* File Watch Reload Button */}
               <ReloadButton

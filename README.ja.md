@@ -25,7 +25,7 @@ lensdiff は [difit](https://github.com/yoshiko-pg/difit) の fork で、AI エ�
 
   ![シンボルパネル](docs/images/symbol-panel.png)
 
-- **ファイル全体の表示**: `--context 100000` を付けると、変更のない行を折りたたまずにファイル全体を表示します。
+- **ファイル全体の表示**: ヘッダーの **Show Full File**（既定で ON）で、変更のない行を折りたたまずにファイル全体を表示します。OFF にすると、変更の前後 `--context` 行（未指定なら git の既定の 3 行）だけを残して折りたたみます。全体表示のための `--context 100000` は不要です。選択はほかの UI 設定と一緒に保存されます。`--pr` と stdin では効きません。
 
 finding の例:
 

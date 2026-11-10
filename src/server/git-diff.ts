@@ -13,6 +13,10 @@ import { getMergeBaseTargetRef, normalizeBaseMode } from '../utils/diffSelection
 
 import { isGeneratedFile } from './generated-file-check.js';
 
+export type DiffContextLines = number | 'full';
+
+const FULL_FILE_CONTEXT_LINES = 1_000_000_000;
+
 export class GitDiffParser {
   private git: SimpleGit;
   private repoPath: string;
@@ -59,7 +63,7 @@ export class GitDiffParser {
   async parseDiff(
     selection: DiffSelection,
     ignoreWhitespace = false,
-    contextLines?: number,
+    contextLines?: DiffContextLines,
   ): Promise<DiffResponse> {
     const { targetCommitish, baseCommitish } = selection;
     const requestedBaseMode =
@@ -112,7 +116,7 @@ export class GitDiffParser {
       }
 
       if (contextLines !== undefined) {
-        diffArgs.push(`-U${contextLines}`);
+        diffArgs.push(`-U${contextLines === 'full' ? FULL_FILE_CONTEXT_LINES : contextLines}`);
       }
 
       // Ignore external diff-tools to unify output.

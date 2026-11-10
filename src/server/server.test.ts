@@ -364,17 +364,22 @@ describe('Server Integration Tests', () => {
 
   let servers: any[] = [];
   let originalProcessExit: any;
+  let userConfigDir: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Mock process.exit to prevent tests from actually exiting
     originalProcessExit = process.exit;
     process.exit = vi.fn() as any;
     parserInstances.length = 0;
+    userConfigDir = await fs.mkdtemp(join(tmpdir(), 'difit-server-config-'));
+    vi.stubEnv('DIFIT_CONFIG_DIR', userConfigDir);
   });
 
   afterEach(async () => {
     // Restore process.exit
     process.exit = originalProcessExit;
+    vi.unstubAllEnvs();
+    await fs.rm(userConfigDir, { recursive: true, force: true });
 
     // Clean up any servers created during tests
     for (const server of servers) {
@@ -436,10 +441,31 @@ describe('Server Integration Tests', () => {
       expect(result.url).toContain('http://localhost:'); // Display host conversion
     });
 
-    it('passes context lines to the initial diff load', async () => {
+    it('loads the full file initially when the saved setting is absent', async () => {
       const result = await startServer({
         selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
         preferredPort: 9025,
+        contextLines: 4,
+      });
+      servers.push(result.server);
+
+      const parser = parserInstances.at(-1);
+      expect(parser?.parseDiff).toHaveBeenCalledWith(
+        { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
+        false,
+        'full',
+      );
+    });
+
+    it('passes context lines to the initial diff load when the full file is turned off', async () => {
+      await fs.writeFile(
+        join(userConfigDir, 'config.json'),
+        JSON.stringify({ version: 1, client: { showFullFile: false } }),
+      );
+
+      const result = await startServer({
+        selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
+        preferredPort: 9026,
         contextLines: 4,
       });
       servers.push(result.server);
@@ -537,6 +563,40 @@ describe('Server Integration Tests', () => {
       );
     });
 
+    it('GET /api/diff serves the full file from the startup cache and caches collapsed context separately', async () => {
+      const result = await startServer({
+        selection: { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
+        preferredPort: 9034,
+        contextLines: 2,
+      });
+      servers.push(result.server);
+
+      const parser = parserInstances.at(-1);
+      parser?.parseDiff.mockClear();
+
+      const fullFileResponse = await fetch(
+        `http://localhost:${result.port}/api/diff?showFullFile=true`,
+      );
+      expect(fullFileResponse.ok).toBe(true);
+      expect(parser?.parseDiff).not.toHaveBeenCalled();
+
+      const collapsedResponse = await fetch(
+        `http://localhost:${result.port}/api/diff?showFullFile=false`,
+      );
+      expect(collapsedResponse.ok).toBe(true);
+      expect(parser?.parseDiff).toHaveBeenLastCalledWith(
+        { targetCommitish: 'HEAD', baseCommitish: 'HEAD^' },
+        false,
+        2,
+      );
+
+      const cachedCollapsedResponse = await fetch(
+        `http://localhost:${result.port}/api/diff?showFullFile=false`,
+      );
+      expect(cachedCollapsedResponse.ok).toBe(true);
+      expect(parser?.parseDiff).toHaveBeenCalledTimes(1);
+    });
+
     it('GET /api/diff passes baseMode through to the parser', async () => {
       const parser = parserInstances.at(-1);
       parser?.parseDiff.mockClear();
@@ -583,17 +643,17 @@ describe('Server Integration Tests', () => {
       parser?.parseDiff.mockClear();
 
       const firstResponse = await fetch(
-        `http://localhost:${result.port}/api/diff?base=main&target=feature`,
+        `http://localhost:${result.port}/api/diff?base=main&target=feature&showFullFile=true`,
       );
       expect(firstResponse.ok).toBe(true);
 
       const secondResponse = await fetch(
-        `http://localhost:${result.port}/api/diff?base=HEAD%5E&target=HEAD`,
+        `http://localhost:${result.port}/api/diff?base=HEAD%5E&target=HEAD&showFullFile=true`,
       );
       expect(secondResponse.ok).toBe(true);
 
       const thirdResponse = await fetch(
-        `http://localhost:${result.port}/api/diff?base=main&target=feature`,
+        `http://localhost:${result.port}/api/diff?base=main&target=feature&showFullFile=true`,
       );
       expect(thirdResponse.ok).toBe(true);
 
@@ -602,7 +662,7 @@ describe('Server Integration Tests', () => {
         1,
         { targetCommitish: 'feature', baseCommitish: 'main' },
         false,
-        undefined,
+        'full',
       );
     });
 
