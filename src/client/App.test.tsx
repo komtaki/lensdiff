@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { HotkeysProvider } from 'react-hotkeys-hook';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom';
@@ -988,7 +989,10 @@ describe('App Component - Diff Mode Persistence', () => {
     await waitFor(() => {
       // 4 calls: initial /api/diff, /api/revisions, initial /api/comments sync, and refresh /api/diff
       const diffAndCommentCalls = mockGlobalFetch.mock.calls.filter(
-        ([url]) => !['/api/overview', '/api/reviewers', '/api/lsp/status'].includes(String(url)),
+        ([url]) =>
+          !['/api/overview', '/api/reviewers', '/api/lsp/status', '/api/commits'].includes(
+            String(url),
+          ),
       );
       expect(diffAndCommentCalls).toHaveLength(4);
     });
@@ -1260,15 +1264,14 @@ describe('App Component - Revision-aware refetching', () => {
     renderApp();
 
     fireEvent.click(await screen.findByRole('button', { name: /Revision menu:/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Previous commit' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'HEAD...Uncommitted (merge-base)' }));
 
     await waitFor(() => {
       const diffCalls = vi
         .mocked(global.fetch)
         .mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/diff'));
       expect(diffCalls).toHaveLength(2);
-      expect(String(diffCalls[1]?.[0])).toContain('base=HEAD%5E%5E');
-      expect(String(diffCalls[1]?.[0])).toContain('target=HEAD%5E');
+      expect(String(diffCalls[1]?.[0])).toContain('base=HEAD&target=.&baseMode=merge-base');
     });
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Ignore Whitespace' }));
@@ -1278,8 +1281,7 @@ describe('App Component - Revision-aware refetching', () => {
         .mocked(global.fetch)
         .mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/diff'));
       expect(diffCalls).toHaveLength(3);
-      expect(String(diffCalls[2]?.[0])).toContain('base=HEAD%5E%5E');
-      expect(String(diffCalls[2]?.[0])).toContain('target=HEAD%5E');
+      expect(String(diffCalls[2]?.[0])).toContain('base=HEAD&target=.&baseMode=merge-base');
     });
   });
 });
@@ -2057,5 +2059,385 @@ describe('App Component - Opening a file from the file list', () => {
 
     await waitFor(() => expect(scrollToSpy).toHaveBeenCalledWith({ top: FILE_HEADER_TOP }));
     expect(scrollToSpy).not.toHaveBeenCalledWith({ top: FIRST_CHANGE_TOP });
+  });
+});
+
+describe('App Component - Commit view', () => {
+  const firstCommit = { hash: 'a'.repeat(40), shortHash: 'aaaaaaa', message: 'First change' };
+  const secondCommit = { hash: 'c'.repeat(40), shortHash: 'ccccccc', message: 'Second change' };
+  const commitDiffResponse: DiffResponse = {
+    ...mockDiffResponse,
+    commit: 'aaaaaaa...ccccccc',
+    baseCommitish: 'aaaaaaa',
+    targetCommitish: 'ccccccc',
+    requestedBaseCommitish: firstCommit.hash,
+    requestedTargetCommitish: secondCommit.hash,
+    files: [{ path: 'commit-only.ts', status: 'added', additions: 1, deletions: 0, chunks: [] }],
+    approveAvailable: false,
+    openInEditorAvailable: false,
+    commitScope: secondCommit.hash,
+  };
+  const commitViewRoutes: Record<string, unknown> = {
+    '/api/overview': { markdown: '# Summary' },
+    '/api/reviewers': { reviewers: [] },
+    '/api/commits': { commits: [firstCommit, secondCommit] },
+    '/api/commit-diff': commitDiffResponse,
+  };
+
+  const mockDeferredCommitDiff = () => {
+    const resolvers = new Map<string, () => void>();
+    vi.mocked(global.fetch).mockImplementation((input) => {
+      const [path = '', query = ''] = String(input).split('?');
+      if (path === '/api/commit-diff') {
+        const hash = new URLSearchParams(query).get('hash') ?? '';
+        const data: DiffResponse = {
+          ...commitDiffResponse,
+          commitScope: hash,
+          files: [
+            {
+              path: `${hash.slice(0, 7)}-only.ts`,
+              status: 'added',
+              additions: 1,
+              deletions: 0,
+              chunks: [],
+            },
+          ],
+        };
+        return new Promise<Response>((resolve) => {
+          resolvers.set(hash, () => resolve({ ok: true, json: async () => data } as Response));
+        });
+      }
+      if (path === '/api/revisions') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ specialOptions: [], branches: [], commits: [] }),
+        } as Response);
+      }
+      const body = path in commitViewRoutes ? commitViewRoutes[path] : mockDiffResponse;
+      return Promise.resolve({ ok: true, json: async () => body } as Response);
+    });
+    return async (hash: string) => {
+      await act(async () => {
+        resolvers.get(hash)?.();
+      });
+    };
+  };
+
+  const getFetchedUrls = (path: string) =>
+    vi
+      .mocked(global.fetch)
+      .mock.calls.map(([url]) => String(url))
+      .filter((url) => url.startsWith(path));
+
+  const secondCommitName = /2\. ccccccc Second change/;
+  const selectScope = (name: string | RegExp) =>
+    fireEvent.click(screen.getByRole('radio', { name }));
+  const expectSelected = (name: string | RegExp) =>
+    expect(screen.getByRole('radio', { name })).toHaveAttribute('aria-checked', 'true');
+
+  const openSecondCommit = async () => {
+    renderApp();
+    await screen.findByRole('radio', { name: secondCommitName });
+    selectScope(secondCommitName);
+    await screen.findByTitle('commit-only.ts');
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockComments = [
+      createMockThread({ id: 'whole-1', filePath: 'test.ts', line: 3, body: 'Whole diff note' }),
+    ];
+    mockConfirm.mockReturnValue(false);
+    mockWatchState.shouldReload = false;
+    mockWatchState.lastChangeType = null;
+    mockReviewFetch(commitViewRoutes);
+  });
+
+  it('shows one commit read-only while keeping comments bound to the whole diff', async () => {
+    renderApp();
+    expect(await screen.findByRole('tab', { name: 'Overview' })).toBeInTheDocument();
+    await screen.findByRole('radio', { name: secondCommitName });
+    expectSelected('All changes');
+    expect(screen.getByText('Commits (2)')).toBeInTheDocument();
+    expect(screen.getByTitle(/Copy all \d+ comments/)).toBeInTheDocument();
+    expect(screen.getByText('0 / 1 files viewed')).toBeInTheDocument();
+
+    selectScope(secondCommitName);
+
+    expect(await screen.findByTitle('commit-only.ts')).toBeInTheDocument();
+    expect(getFetchedUrls('/api/commit-diff')).toEqual([
+      `/api/commit-diff?hash=${secondCommit.hash}&ignoreWhitespace=true&showFullFile=true`,
+    ]);
+    expectSelected(secondCommitName);
+    expect(screen.getByText('Read-only')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
+    expect(screen.queryByTitle(/Copy all \d+ comments/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/files viewed/)).not.toBeInTheDocument();
+    expect(vi.mocked(useDiffComments)).toHaveBeenLastCalledWith(
+      'HEAD^',
+      'HEAD',
+      'abc123',
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(vi.mocked(useViewedFiles)).toHaveBeenLastCalledWith(
+      'HEAD^',
+      'HEAD',
+      'abc123',
+      undefined,
+      mockDiffResponse.files,
+      undefined,
+      expect.anything(),
+      undefined,
+    );
+  });
+
+  it('keeps the review tabs on the whole diff and returns to it from a finding', async () => {
+    const timestamp = '2024-01-01T00:00:00.000Z';
+    mockComments = [
+      {
+        ...createMockThread({ id: 'f1', filePath: 'test.ts', line: 3, body: 'Body', author: 'AI' }),
+        createdAt: timestamp,
+        kind: 'finding',
+        finding: { reviewer: 'security', severity: 'error', title: 'Injection' },
+      },
+    ];
+    await openSecondCommit();
+
+    expect(screen.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'AI review (1)' }));
+    fireEvent.click(screen.getByText('Injection'));
+
+    expect(await screen.findByTitle('test.ts')).toBeInTheDocument();
+    expectSelected('All changes');
+    expect(screen.getByRole('tab', { name: 'Files changed' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+  });
+
+  it('does not toggle viewed files while a commit is shown', async () => {
+    await openSecondCommit();
+
+    fireEvent.click(screen.getAllByTitle('Mark as reviewed')[0]!);
+
+    expect(mockToggleFileViewed).not.toHaveBeenCalled();
+  });
+
+  it('refetches the shown commit on reload and stays on it', async () => {
+    mockWatchState.shouldReload = true;
+    mockWatchState.lastChangeType = 'file';
+    await openSecondCommit();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => expect(getFetchedUrls('/api/commit-diff')).toHaveLength(2));
+    expect(getFetchedUrls('/api/diff')).toHaveLength(2);
+    expect(screen.getByTitle('commit-only.ts')).toBeInTheDocument();
+    expectSelected(secondCommitName);
+  });
+
+  it('returns to the whole diff with its review UI on All changes', async () => {
+    await openSecondCommit();
+
+    selectScope('All changes');
+
+    expect(await screen.findByTitle('test.ts')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
+    expect(screen.getByTitle(/Copy all \d+ comments/)).toBeInTheDocument();
+    expect(screen.queryByText('Read-only')).not.toBeInTheDocument();
+    expect(getFetchedUrls('/api/diff')).toHaveLength(1);
+  });
+
+  it('falls back to the whole diff when the shown commit cannot be reloaded', async () => {
+    mockWatchState.shouldReload = true;
+    mockWatchState.lastChangeType = 'file';
+    await openSecondCommit();
+    mockReviewFetch(commitViewRoutes, { '/api/commit-diff': 404 });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    expect(await screen.findByTitle('test.ts')).toBeInTheDocument();
+    expect(getFetchedUrls('/api/commit-diff')).toHaveLength(2);
+    expectSelected('All changes');
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+  });
+
+  it('leaves the commit view when the range shrinks to a single commit', async () => {
+    mockWatchState.shouldReload = true;
+    mockWatchState.lastChangeType = 'file';
+    await openSecondCommit();
+    mockReviewFetch({
+      ...commitViewRoutes,
+      '/api/diff': { ...mockDiffResponse, targetCommitish: 'HEAD@moved' },
+      '/api/commits': { commits: [secondCommit] },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    expect(await screen.findByTitle('test.ts')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('Read-only')).not.toBeInTheDocument());
+    expect(screen.queryByRole('radiogroup', { name: 'Commits' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+  });
+
+  it('keeps the latest commit when an earlier commit response arrives late', async () => {
+    const resolveCommitDiff = mockDeferredCommitDiff();
+    renderApp();
+    await screen.findByRole('radio', { name: secondCommitName });
+
+    selectScope(/1\. aaaaaaa First change/);
+    selectScope(secondCommitName);
+    await resolveCommitDiff(secondCommit.hash);
+    await resolveCommitDiff(firstCommit.hash);
+
+    expect(screen.getByTitle('ccccccc-only.ts')).toBeInTheDocument();
+    expect(screen.queryByTitle('aaaaaaa-only.ts')).not.toBeInTheDocument();
+    expectSelected(secondCommitName);
+  });
+
+  it('stays on the whole diff when All changes is chosen before the commit arrives', async () => {
+    const resolveCommitDiff = mockDeferredCommitDiff();
+    renderApp();
+    await screen.findByRole('radio', { name: secondCommitName });
+
+    selectScope(secondCommitName);
+    selectScope('All changes');
+    await resolveCommitDiff(secondCommit.hash);
+
+    expect(screen.getByTitle('test.ts')).toBeInTheDocument();
+    expect(screen.queryByTitle('ccccccc-only.ts')).not.toBeInTheDocument();
+    expectSelected('All changes');
+  });
+
+  it('steps from the requested commit when Shift+J is pressed before the response', async () => {
+    const user = userEvent.setup();
+    const resolveCommitDiff = mockDeferredCommitDiff();
+    renderApp();
+    await screen.findByRole('radio', { name: secondCommitName });
+
+    await user.keyboard('{Shift>}j{/Shift}');
+    await user.keyboard('{Shift>}j{/Shift}');
+    await resolveCommitDiff(secondCommit.hash);
+
+    expect(getFetchedUrls('/api/commit-diff').map((url) => url.split('&')[0])).toEqual([
+      `/api/commit-diff?hash=${firstCommit.hash}`,
+      `/api/commit-diff?hash=${secondCommit.hash}`,
+    ]);
+    expectSelected(secondCommitName);
+  });
+
+  it('cancels a pending commit when jumping to a finding', async () => {
+    mockComments = [
+      {
+        ...createMockThread({ id: 'f1', filePath: 'test.ts', line: 3, body: 'Body', author: 'AI' }),
+        kind: 'finding',
+        finding: { reviewer: 'security', severity: 'error', title: 'Injection' },
+      },
+    ];
+    const resolveCommitDiff = mockDeferredCommitDiff();
+    renderApp();
+    await screen.findByRole('radio', { name: secondCommitName });
+    fireEvent.click(screen.getByRole('tab', { name: 'AI review (1)' }));
+
+    selectScope(secondCommitName);
+    fireEvent.click(screen.getByText('Injection'));
+    await resolveCommitDiff(secondCommit.hash);
+
+    expect(screen.getByTitle('test.ts')).toBeInTheDocument();
+    expect(screen.queryByTitle('ccccccc-only.ts')).not.toBeInTheDocument();
+    expectSelected('All changes');
+    expect(screen.getByRole('tab', { name: 'Files changed' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('shows the commit diff without comment buttons or whole-diff threads', async () => {
+    const chunk = {
+      header: '@@ -1,2 +1,3 @@',
+      oldStart: 1,
+      oldLines: 2,
+      newStart: 1,
+      newLines: 3,
+      lines: [
+        { type: 'normal' as const, content: 'const a = 1;', oldLineNumber: 1, newLineNumber: 1 },
+        { type: 'normal' as const, content: 'const b = 2;', oldLineNumber: 2, newLineNumber: 2 },
+        { type: 'add' as const, content: 'const c = 3;', newLineNumber: 3 },
+      ],
+    };
+    const fileWithLines = {
+      path: 'test.ts',
+      status: 'modified' as const,
+      additions: 1,
+      deletions: 0,
+      chunks: [chunk],
+    };
+    mockReviewFetch({
+      ...commitViewRoutes,
+      '/api/diff': { ...mockDiffResponse, files: [fileWithLines] },
+      '/api/commit-diff': { ...commitDiffResponse, files: [fileWithLines] },
+    });
+    const hoverAddedLine = () => {
+      const row = screen.getByRole('main').querySelectorAll('[data-diff-line-row="true"]')[2]!;
+      fireEvent.mouseEnter(row);
+      Array.from(row.children).forEach((cell) => fireEvent.mouseEnter(cell));
+    };
+
+    renderApp();
+    fireEvent.click(await screen.findByRole('tab', { name: 'Files changed' }));
+    expect(await within(screen.getByRole('main')).findByText('Whole diff note')).toBeVisible();
+    hoverAddedLine();
+    expect(screen.getAllByRole('button', { name: 'Add a comment' }).length).toBeGreaterThan(0);
+
+    selectScope(secondCommitName);
+    expect(await screen.findByText('Read-only')).toBeInTheDocument();
+    hoverAddedLine();
+
+    expect(screen.queryByRole('button', { name: 'Add a comment' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('main')).queryByText('Whole diff note')).not.toBeInTheDocument();
+  });
+
+  it('hides the commit selector when the range has a single commit', async () => {
+    mockReviewFetch({
+      '/api/overview': { markdown: null },
+      '/api/reviewers': { reviewers: [] },
+      '/api/commits': { commits: [firstCommit] },
+    });
+    renderApp();
+
+    expect(await screen.findByTitle('test.ts')).toBeInTheDocument();
+    await waitFor(() => expect(getFetchedUrls('/api/commits')).toHaveLength(1));
+    expect(screen.queryByRole('radiogroup', { name: 'Commits' })).not.toBeInTheDocument();
+  });
+
+  it('steps through commits with Shift+J and Shift+K and stops at the ends', async () => {
+    const user = userEvent.setup();
+    mockReviewFetch({
+      ...commitViewRoutes,
+      '/api/commit-diff': { ...commitDiffResponse, commitScope: firstCommit.hash },
+    });
+    renderApp();
+    await screen.findByRole('radio', { name: secondCommitName });
+
+    await user.keyboard('{Shift>}k{/Shift}');
+    expect(getFetchedUrls('/api/commit-diff')).toHaveLength(0);
+
+    await user.keyboard('{Shift>}j{/Shift}');
+    await waitFor(() =>
+      expect(getFetchedUrls('/api/commit-diff')).toEqual([
+        `/api/commit-diff?hash=${firstCommit.hash}&ignoreWhitespace=true&showFullFile=true`,
+      ]),
+    );
+    await screen.findByTitle('commit-only.ts');
+    expectSelected(/1\. aaaaaaa First change/);
+
+    await user.keyboard('{Shift>}k{/Shift}');
+    expect(await screen.findByTitle('test.ts')).toBeInTheDocument();
+    expectSelected('All changes');
   });
 });

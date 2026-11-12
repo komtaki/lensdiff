@@ -11,6 +11,7 @@ import pkg from '../../package.json' with { type: 'json' };
 import { FileWatcherService } from './file-watcher.js';
 import { startServer } from './server.js';
 import type { CommentImport } from '../types/diff.js';
+import { DiffMode } from '../types/watch.js';
 
 // Add fetch polyfill for Node.js test environment
 const { fetch } = await import('undici');
@@ -88,6 +89,10 @@ vi.mock('./git-diff.js', () => {
       source: 'content',
     });
     clearResolvedCommitCache = vi.fn();
+    getRangeCommits = vi.fn().mockResolvedValue([
+      { hash: 'a'.repeat(40), shortHash: 'aaaaaaa', message: 'First', diffBase: 'b'.repeat(40) },
+      { hash: 'c'.repeat(40), shortHash: 'ccccccc', message: 'Second', diffBase: 'a'.repeat(40) },
+    ]);
     getRevisionOptions = vi.fn().mockResolvedValue({
       branches: [{ name: 'main', current: true }],
       commits: [{ hash: 'abc1234', shortHash: 'abc1234', message: 'Test commit' }],
@@ -2139,6 +2144,167 @@ describe('Server Integration Tests', () => {
 
       // Without keepAlive, process.exit SHOULD have been called
       expect(process.exit).toHaveBeenCalledWith(0);
+    });
+  });
+
+  describe('Commit view API', () => {
+    const initialSelection = {
+      baseCommitish: 'origin/main',
+      targetCommitish: 'HEAD',
+      baseMode: 'merge-base' as const,
+    };
+    const secondCommitHash = 'c'.repeat(40);
+
+    it('lists the commits of the reviewed range without internal diff bases', async () => {
+      const { port, server } = await startServer({ selection: initialSelection });
+      servers.push(server);
+
+      const response = await fetch(`http://localhost:${port}/api/commits`);
+
+      expect(response.ok).toBe(true);
+      expect(await response.json()).toEqual({
+        commits: [
+          { hash: 'a'.repeat(40), shortHash: 'aaaaaaa', message: 'First' },
+          { hash: secondCommitHash, shortHash: 'ccccccc', message: 'Second' },
+        ],
+      });
+      expect(parserInstances.at(-1).getRangeCommits).toHaveBeenCalledWith(initialSelection);
+    });
+
+    it('reuses the range commits until the cache is invalidated', async () => {
+      const { port, server } = await startServer({ selection: initialSelection });
+      servers.push(server);
+      const parser = parserInstances.at(-1);
+
+      await fetch(`http://localhost:${port}/api/commits`);
+      await fetch(`http://localhost:${port}/api/commit-diff?hash=${secondCommitHash}`);
+
+      expect(parser.getRangeCommits).toHaveBeenCalledTimes(1);
+    });
+
+    it('lists the range commits again after the file watcher invalidates the cache', async () => {
+      const startSpy = vi.spyOn(FileWatcherService.prototype, 'start').mockResolvedValue();
+      try {
+        const { port, server } = await startServer({
+          selection: initialSelection,
+          diffMode: DiffMode.DEFAULT,
+        });
+        servers.push(server);
+        const parser = parserInstances.at(-1);
+        const invalidateCache = startSpy.mock.calls[0]?.[3] as () => void;
+
+        await fetch(`http://localhost:${port}/api/commits`);
+        invalidateCache();
+        await fetch(`http://localhost:${port}/api/commits`);
+
+        expect(parser.getRangeCommits).toHaveBeenCalledTimes(2);
+      } finally {
+        startSpy.mockRestore();
+      }
+    });
+
+    it('returns no commits for a stdin diff', async () => {
+      const { port, server } = await startServer({
+        stdinDiff: 'diff --git a/stdin-test.js b/stdin-test.js',
+      });
+      servers.push(server);
+
+      const response = await fetch(`http://localhost:${port}/api/commits`);
+
+      expect(await response.json()).toEqual({ commits: [] });
+    });
+
+    it('serves a commit diff against its first parent as a read-only response', async () => {
+      const { port, server } = await startServer({ selection: initialSelection });
+      servers.push(server);
+      const parser = parserInstances.at(-1);
+
+      const response = await fetch(
+        `http://localhost:${port}/api/commit-diff?hash=${secondCommitHash}&ignoreWhitespace=true`,
+      );
+      const data = (await response.json()) as any;
+
+      expect(response.ok).toBe(true);
+      expect(parser.parseDiff).toHaveBeenLastCalledWith(
+        { baseCommitish: 'a'.repeat(40), targetCommitish: secondCommitHash },
+        true,
+        undefined,
+      );
+      expect(data).toMatchObject({
+        commitScope: secondCommitHash,
+        approveAvailable: false,
+        openInEditorAvailable: false,
+        ignoreWhitespace: true,
+      });
+      expect(data.commentImports).toBeUndefined();
+    });
+
+    it('rejects a missing hash or a commit outside the reviewed range', async () => {
+      const { port, server } = await startServer({ selection: initialSelection });
+      servers.push(server);
+
+      const missing = await fetch(`http://localhost:${port}/api/commit-diff`);
+      const outside = await fetch(
+        `http://localhost:${port}/api/commit-diff?hash=${'d'.repeat(40)}`,
+      );
+
+      expect(missing.status).toBe(400);
+      expect(outside.status).toBe(404);
+    });
+
+    it('keeps the current selection on the whole diff', async () => {
+      const { port, server } = await startServer({ selection: initialSelection });
+      servers.push(server);
+      const parser = parserInstances.at(-1);
+
+      await fetch(`http://localhost:${port}/api/commit-diff?hash=${secondCommitHash}`);
+      await fetch(`http://localhost:${port}/api/diff`);
+
+      expect(parser.parseDiff).toHaveBeenLastCalledWith(initialSelection, false, undefined);
+    });
+
+    it('prints the whole-diff comments on exit after a commit was viewed', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const { port, server } = await startServer({
+          selection: initialSelection,
+          preferredPort: 9150,
+        });
+        servers.push(server);
+
+        await fetch(`http://localhost:${port}/api/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            comments: [
+              {
+                id: '1',
+                file: 'test.js',
+                line: 3,
+                body: 'Whole diff comment',
+                timestamp: '2024-01-01T00:00:00Z',
+              },
+            ],
+          }),
+        });
+        await fetch(`http://localhost:${port}/api/commit-diff?hash=${secondCommitHash}`);
+
+        const output = await fetch(`http://localhost:${port}/api/comments-output`);
+        expect(await output.text()).toContain('Whole diff comment');
+
+        const controller = new AbortController();
+        const heartbeat = await fetch(`http://localhost:${port}/api/heartbeat`, {
+          signal: controller.signal,
+        });
+        await heartbeat.body?.getReader().read();
+        controller.abort();
+        await vi.waitFor(() => expect(process.exit).toHaveBeenCalled());
+
+        const logged = logSpy.mock.calls.map((args) => args.join(' '));
+        expect(logged.some((line) => line.includes('Whole diff comment'))).toBe(true);
+      } finally {
+        logSpy.mockRestore();
+      }
     });
   });
 

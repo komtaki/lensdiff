@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { createElement } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { DiffQuickMenu, getPreviousCommitPreset } from './DiffQuickMenu';
+import { DiffQuickMenu } from './DiffQuickMenu';
 
 const options = {
   specialOptions: [
@@ -21,32 +21,6 @@ const options = {
   originDefaultBranch: 'origin/main',
 };
 
-describe('getPreviousCommitPreset', () => {
-  it.each(['', '.', 'staged', 'working'])('uses HEAD as target for %s', (targetRevision) => {
-    expect(getPreviousCommitPreset(targetRevision)).toEqual({
-      baseCommitish: 'HEAD^',
-      targetCommitish: 'HEAD',
-    });
-  });
-
-  it('uses selected target when it is already a commit-ish', () => {
-    expect(getPreviousCommitPreset('HEAD')).toEqual({
-      baseCommitish: 'HEAD^^',
-      targetCommitish: 'HEAD^',
-    });
-
-    expect(getPreviousCommitPreset('main')).toEqual({
-      baseCommitish: 'main^^',
-      targetCommitish: 'main^',
-    });
-
-    expect(getPreviousCommitPreset('abc1234')).toEqual({
-      baseCommitish: 'abc1234^^',
-      targetCommitish: 'abc1234^',
-    });
-  });
-});
-
 describe('DiffQuickMenu', () => {
   it('shows commit label when previous-pair target resolves to a listed commit', () => {
     render(
@@ -61,30 +35,6 @@ describe('DiffQuickMenu', () => {
     );
 
     expect(screen.getByText('1f23cd1 chore: release v3.1.5')).toBeInTheDocument();
-  });
-
-  it('highlights resolved commit in Pick Commit list for previous-pair selection', async () => {
-    render(
-      createElement(DiffQuickMenu, {
-        options,
-        selection: { baseCommitish: 'HEAD^^', targetCommitish: 'HEAD^' },
-        resolvedBaseRevision: '88aabb0',
-        resolvedTargetRevision: '1f23cd1',
-        onSelectDiff: vi.fn(),
-        onOpenAdvanced: vi.fn(),
-      }),
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Pick Commit...' }));
-
-    const commitButtons = await screen.findAllByRole('button', {
-      name: /1f23cd1/,
-    });
-    const highlightedCommitButton = commitButtons.find((button) =>
-      button.className.includes('border-l-diff-selected-border'),
-    );
-    expect(highlightedCommitButton).toBeDefined();
   });
 
   it('shows only requested quick diff presets', () => {
@@ -110,7 +60,7 @@ describe('DiffQuickMenu', () => {
         name: 'origin/main...Uncommitted (merge-base)',
       }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'HEAD' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'HEAD (last commit)' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'HEAD...Staging' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Staging...Working' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'main...HEAD' })).not.toBeInTheDocument();
@@ -128,11 +78,11 @@ describe('DiffQuickMenu', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
 
-    const quickDiffSection = screen.getByText('Quick Diffs').parentElement;
+    const quickDiffSection = screen.getByText('Review range').parentElement;
     expect(quickDiffSection).not.toBeNull();
 
     const quickDiffButtons = within(quickDiffSection!).getAllByRole('button');
-    expect(quickDiffButtons[0]).toHaveTextContent('HEAD');
+    expect(quickDiffButtons[0]).toHaveTextContent('HEAD (last commit)');
   });
 
   it('selects HEAD commit when HEAD quick preset is clicked', () => {
@@ -147,7 +97,7 @@ describe('DiffQuickMenu', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'HEAD' }));
+    fireEvent.click(screen.getByRole('button', { name: 'HEAD (last commit)' }));
 
     expect(onSelectDiff).toHaveBeenCalledWith({
       baseCommitish: 'HEAD^',
@@ -180,50 +130,6 @@ describe('DiffQuickMenu', () => {
     });
   });
 
-  it('filters the menu down to matching commits when typing in the search box', () => {
-    render(
-      createElement(DiffQuickMenu, {
-        options,
-        selection: { baseCommitish: 'HEAD', targetCommitish: '.' },
-        onSelectDiff: vi.fn(),
-        onOpenAdvanced: vi.fn(),
-      }),
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
-    fireEvent.change(screen.getByPlaceholderText('Filter branches and commits...'), {
-      target: { value: 'release' },
-    });
-
-    expect(screen.getByRole('button', { name: /1f23cd1/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'HEAD' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Pick Commit...' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Detailed...' })).not.toBeInTheDocument();
-  });
-
-  it('selects commit^...commit when a filtered commit is clicked', () => {
-    const onSelectDiff = vi.fn();
-    render(
-      createElement(DiffQuickMenu, {
-        options,
-        selection: { baseCommitish: 'HEAD', targetCommitish: '.' },
-        onSelectDiff,
-        onOpenAdvanced: vi.fn(),
-      }),
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
-    fireEvent.change(screen.getByPlaceholderText('Filter branches and commits...'), {
-      target: { value: 'release' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /1f23cd1/ }));
-
-    expect(onSelectDiff).toHaveBeenCalledWith({
-      baseCommitish: '1f23cd1^',
-      targetCommitish: '1f23cd1',
-    });
-  });
-
   it('selects branch...Uncommitted (merge-base) when a filtered branch is clicked', () => {
     const onSelectDiff = vi.fn();
     render(
@@ -236,7 +142,7 @@ describe('DiffQuickMenu', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
-    fireEvent.change(screen.getByPlaceholderText('Filter branches and commits...'), {
+    fireEvent.change(screen.getByPlaceholderText('Filter ranges and branches...'), {
       target: { value: 'main' },
     });
 
@@ -267,13 +173,14 @@ describe('DiffQuickMenu', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
-    const searchInput = screen.getByPlaceholderText('Filter branches and commits...');
-    fireEvent.change(searchInput, { target: { value: 'v3.1.5' } });
+    const searchInput = screen.getByPlaceholderText('Filter ranges and branches...');
+    fireEvent.change(searchInput, { target: { value: 'origin' } });
     fireEvent.keyDown(searchInput, { key: 'Enter' });
 
     expect(onSelectDiff).toHaveBeenCalledWith({
-      baseCommitish: '1f23cd1^',
-      targetCommitish: '1f23cd1',
+      baseCommitish: 'origin/main',
+      targetCommitish: '.',
+      baseMode: 'merge-base',
     });
   });
 
@@ -288,11 +195,35 @@ describe('DiffQuickMenu', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
-    fireEvent.change(screen.getByPlaceholderText('Filter branches and commits...'), {
+    fireEvent.change(screen.getByPlaceholderText('Filter ranges and branches...'), {
       target: { value: 'does-not-exist' },
     });
 
-    expect(screen.getByText('No matching branches or commits')).toBeInTheDocument();
+    expect(screen.getByText('No matching ranges or branches')).toBeInTheDocument();
+  });
+
+  it('offers review ranges only, without per-commit switching', () => {
+    render(
+      createElement(DiffQuickMenu, {
+        options,
+        selection: { baseCommitish: 'HEAD', targetCommitish: '.' },
+        onSelectDiff: vi.fn(),
+        onOpenAdvanced: vi.fn(),
+      }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Revision menu:/ }));
+    expect(screen.queryByRole('button', { name: 'Previous commit' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Pick Commit/ })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Custom range (Base / Target)...' }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Filter ranges and branches...'), {
+      target: { value: 'release' },
+    });
+    expect(screen.queryByRole('button', { name: /1f23cd1/ })).not.toBeInTheDocument();
+    expect(screen.getByText('No matching ranges or branches')).toBeInTheDocument();
   });
 
   it('shows merge-base in the current label', () => {

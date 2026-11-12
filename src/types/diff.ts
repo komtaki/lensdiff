@@ -62,6 +62,11 @@ export interface DiffResponse {
   repositoryId?: string;
   commentImports?: CommentImport[];
   commentImportId?: string;
+  commitScope?: string;
+}
+
+export interface RangeCommitsResponse {
+  commits: CommitInfo[];
 }
 
 export interface GeneratedStatusResponse {

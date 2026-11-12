@@ -37,7 +37,7 @@ import {
   syncFindingDecisions,
 } from './decision-store.js';
 import { FileWatcherService } from './file-watcher.js';
-import { GitDiffParser, type DiffContextLines } from './git-diff.js';
+import { GitDiffParser, type DiffContextLines, type RangeCommitWithDiffBase } from './git-diff.js';
 import { LspRequestTimeoutError } from './lsp/lsp-client.js';
 import {
   createLspManager,
@@ -58,6 +58,7 @@ import {
   type DiffSelection,
   type FindingMeta,
   type GeneratedStatusResponse,
+  type RangeCommitsResponse,
   type RevisionsResponse,
   type ThreadCommentImport,
 } from '@/types/diff.js';
@@ -206,6 +207,7 @@ export async function startServer(
     { value: GeneratedStatusResponse; expiresAt: number }
   >();
   const diffDataCache = new Map<string, DiffResponse>();
+  const rangeCommitsCache = new Map<string, RangeCommitWithDiffBase[]>();
   const initialIgnoreWhitespace = options.ignoreWhitespace || false;
   const resolveContextLines = (showFullFile: boolean): DiffContextLines | undefined =>
     showFullFile ? 'full' : options.contextLines;
@@ -259,6 +261,7 @@ export async function startServer(
   const invalidateCache = () => {
     diffDataCache.clear();
     generatedStatusCache.clear();
+    rangeCommitsCache.clear();
     parser.clearResolvedCommitCache();
   };
 
@@ -427,6 +430,35 @@ export async function startServer(
     return nextSession;
   }
 
+  async function loadDiff(
+    selection: DiffSelection,
+    ignoreWhitespace: boolean,
+    contextLines: DiffContextLines | undefined,
+  ): Promise<DiffResponse> {
+    const cacheKey = createDiffCacheKey(selection, ignoreWhitespace, contextLines);
+    const cached = getCachedDiffResponse(diffDataCache, cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const diffData = await parser.parseDiff(selection, ignoreWhitespace, contextLines);
+    setCachedDiffResponse(diffDataCache, cacheKey, diffData);
+    generatedStatusCache.clear();
+    return diffData;
+  }
+
+  async function getRangeCommits(): Promise<RangeCommitWithDiffBase[]> {
+    const key = getDiffSelectionKey(currentSelection);
+    const cached = rangeCommitsCache.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const commits = await parser.getRangeCommits(currentSelection);
+    rangeCommitsCache.set(key, commits);
+    return commits;
+  }
+
   app.get('/api/diff', async (req, res) => {
     const ignoreWhitespace = req.query.ignoreWhitespace === 'true';
     const contextLines = resolveContextLines(req.query.showFullFile === 'true');
@@ -448,26 +480,14 @@ export async function startServer(
 
     let responseDiffData = initialDiffData;
     if (!options.stdinDiff) {
-      const cacheKey = createDiffCacheKey(requestedSelection, ignoreWhitespace, contextLines);
-      const cached = getCachedDiffResponse(diffDataCache, cacheKey);
-      if (cached) {
-        responseDiffData = cached;
-      } else {
-        try {
-          responseDiffData = await parser.parseDiff(
-            requestedSelection,
-            ignoreWhitespace,
-            contextLines,
-          );
-        } catch (error) {
-          console.error('Error fetching diff:', error);
-          res.status(500).json({
-            error: error instanceof Error ? error.message : 'Failed to fetch diff',
-          });
-          return;
-        }
-        setCachedDiffResponse(diffDataCache, cacheKey, responseDiffData);
-        generatedStatusCache.clear();
+      try {
+        responseDiffData = await loadDiff(requestedSelection, ignoreWhitespace, contextLines);
+      } catch (error) {
+        console.error('Error fetching diff:', error);
+        res.status(500).json({
+          error: error instanceof Error ? error.message : 'Failed to fetch diff',
+        });
+        return;
       }
     }
 
@@ -581,6 +601,69 @@ export async function startServer(
     } catch (error) {
       console.error('Error fetching revisions:', error);
       res.status(500).json({ error: 'Failed to fetch revisions' });
+    }
+  });
+
+  app.get('/api/commits', async (_req, res) => {
+    if (options.stdinDiff) {
+      res.json({ commits: [] } satisfies RangeCommitsResponse);
+      return;
+    }
+
+    try {
+      const commits = await getRangeCommits();
+      const response: RangeCommitsResponse = {
+        commits: commits.map(({ hash, shortHash, message }) => ({ hash, shortHash, message })),
+      };
+      res.json(response);
+    } catch (error) {
+      console.error('Error fetching commits:', error);
+      res.status(500).json({ error: 'Failed to fetch commits' });
+    }
+  });
+
+  // Unlike /api/diff, this leaves currentSelection and currentCommentSelection untouched, so the
+  // exit output still reports the whole-diff comments while a single commit is being viewed.
+  app.get('/api/commit-diff', async (req, res) => {
+    if (options.stdinDiff) {
+      res.status(400).json({ error: 'Commit view is not available for stdin diff' });
+      return;
+    }
+    if (typeof req.query.hash !== 'string') {
+      res.status(400).json({ error: 'Missing commit hash' });
+      return;
+    }
+
+    const requestedHash = req.query.hash;
+    const ignoreWhitespace = req.query.ignoreWhitespace === 'true';
+    const contextLines = resolveContextLines(req.query.showFullFile === 'true');
+
+    try {
+      const commit = (await getRangeCommits()).find(({ hash }) => hash === requestedHash);
+      if (!commit) {
+        res.status(404).json({ error: 'Commit is not in the reviewed range' });
+        return;
+      }
+
+      const diffData = await loadDiff(
+        createDiffSelection(commit.diffBase, commit.hash),
+        ignoreWhitespace,
+        contextLines,
+      );
+
+      res.json({
+        ...diffData,
+        ignoreWhitespace,
+        openInEditorAvailable: false,
+        approveAvailable: false,
+        repositoryId,
+        commitScope: commit.hash,
+      } satisfies DiffResponse);
+    } catch (error) {
+      console.error('Error fetching commit diff:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to fetch commit diff',
+      });
     }
   });
 

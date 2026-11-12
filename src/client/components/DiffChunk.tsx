@@ -28,7 +28,7 @@ interface DiffChunkProps {
   chunkIndex: number;
   threads: CommentThread[];
   showAuthorBadges?: boolean;
-  onAddComment: (
+  onAddComment?: (
     line: LineNumber,
     body: string,
     codeContent?: string,
@@ -111,13 +111,14 @@ export const DiffChunk = memo(function DiffChunk({
 
   const handleAddComment = useCallback(
     (side: DiffSide, lineNumber: LineNumber) => {
+      if (!onAddComment) return;
       if (commentingLine?.side === side && commentingLine?.lineNumber === lineNumber) {
         setCommentingLine(null);
       } else {
         setCommentingLine({ side, lineNumber });
       }
     },
-    [commentingLine],
+    [commentingLine, onAddComment],
   );
 
   const getCommentLineFromAnchor = (selection: LineSelection): LineNumber => {
@@ -249,7 +250,7 @@ export const DiffChunk = memo(function DiffChunk({
 
   const handleSubmitComment = useCallback(
     async (body: string) => {
-      if (commentingLine !== null) {
+      if (commentingLine !== null && onAddComment) {
         const codeContent = getSelectedCodeContent();
         await onAddComment(commentingLine.lineNumber, body, codeContent, commentingLine.side);
         setCommentingLine(null);
@@ -465,16 +466,20 @@ export const DiffChunk = memo(function DiffChunk({
                       }
                     }
                   }}
-                  onCommentButtonMouseDown={(e) => {
-                    e.stopPropagation();
-                    if (e.shiftKey) {
-                      e.preventDefault();
-                    }
-                    handleCommentButtonMouseDown({
-                      isShiftClick: e.shiftKey,
-                      selection,
-                    });
-                  }}
+                  onCommentButtonMouseDown={
+                    onAddComment
+                      ? (e) => {
+                          e.stopPropagation();
+                          if (e.shiftKey) {
+                            e.preventDefault();
+                          }
+                          handleCommentButtonMouseDown({
+                            isShiftClick: e.shiftKey,
+                            selection,
+                          });
+                        }
+                      : undefined
+                  }
                   onOpenInEditor={
                     onOpenInEditor &&
                     filename &&

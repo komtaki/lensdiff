@@ -29,7 +29,7 @@ interface SideBySideDiffChunkProps {
   chunkIndex: number;
   threads: CommentThread[];
   showAuthorBadges?: boolean;
-  onAddComment: (
+  onAddComment?: (
     line: LineNumber,
     body: string,
     codeContent?: string,
@@ -187,13 +187,14 @@ export function SideBySideDiffChunk({
 
   const handleAddComment = useCallback(
     (side: DiffSide, lineNumber: LineNumber) => {
+      if (!onAddComment) return;
       if (commentingLine?.side === side && commentingLine?.lineNumber === lineNumber) {
         setCommentingLine(null);
       } else {
         setCommentingLine({ side, lineNumber });
       }
     },
-    [commentingLine],
+    [commentingLine, onAddComment],
   );
 
   const getCommentLineFromAnchor = (selection: LineSelection): LineNumber => {
@@ -234,6 +235,19 @@ export function SideBySideDiffChunk({
 
     startCommentDrag(selection);
   };
+
+  const renderCommentButton = (selection: LineSelection | null) =>
+    onAddComment ? (
+      <CommentButton
+        onMouseDown={(e) => {
+          e.stopPropagation();
+          if (e.shiftKey) {
+            e.preventDefault();
+          }
+          handleCommentButtonMouseDown({ isShiftClick: e.shiftKey, selection });
+        }}
+      />
+    ) : null;
 
   const handleRowClick = ({
     isShiftClick,
@@ -322,7 +336,7 @@ export function SideBySideDiffChunk({
 
   const handleSubmitComment = useCallback(
     async (body: string) => {
-      if (commentingLine !== null) {
+      if (commentingLine !== null && onAddComment) {
         const codeContent = getSelectedCodeContent();
         await onAddComment(commentingLine.lineNumber, body, codeContent, commentingLine.side);
         setCommentingLine(null);
@@ -676,18 +690,7 @@ export function SideBySideDiffChunk({
                                 }}
                               />
                             )}
-                          <CommentButton
-                            onMouseDown={(e) => {
-                              e.stopPropagation();
-                              if (e.shiftKey) {
-                                e.preventDefault();
-                              }
-                              handleCommentButtonMouseDown({
-                                isShiftClick: e.shiftKey,
-                                selection: oldSelection,
-                              });
-                            }}
-                          />
+                          {renderCommentButton(oldSelection)}
                         </>
                       )}
                   </td>
@@ -735,18 +738,7 @@ export function SideBySideDiffChunk({
                               }}
                             />
                           )}
-                          <CommentButton
-                            onMouseDown={(e) => {
-                              e.stopPropagation();
-                              if (e.shiftKey) {
-                                e.preventDefault();
-                              }
-                              handleCommentButtonMouseDown({
-                                isShiftClick: e.shiftKey,
-                                selection: newSelection,
-                              });
-                            }}
-                          />
+                          {renderCommentButton(newSelection)}
                         </>
                       )}
                   </td>

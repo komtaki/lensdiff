@@ -225,3 +225,41 @@ describe('DiffChunk range comments', () => {
     });
   });
 });
+
+describe('DiffChunk without onAddComment', () => {
+  const readOnlyProps = {
+    chunk: testChunk,
+    chunkIndex: 0,
+    threads: [],
+    onGenerateThreadPrompt: () => '',
+    onRemoveThread: noop,
+    onReplyToThread: asyncNoop,
+    onRemoveMessage: noop,
+    onUpdateMessage: noop,
+    filename: 'src/example.ts',
+  };
+
+  it('offers no way to open a comment form in unified view', () => {
+    const { container } = renderWithProviders(<DiffChunk {...readOnlyProps} mode="unified" />);
+
+    const rows = container.querySelectorAll('[data-diff-line-row="true"]');
+    fireEvent.mouseEnter(rows[2]!);
+    expect(screen.queryByRole('button', { name: 'Add a comment' })).not.toBeInTheDocument();
+
+    fireEvent.click(rows[0]!);
+    fireEvent.click(rows[2]!, { shiftKey: true });
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  });
+
+  it('offers no way to open a comment form in split view', () => {
+    const { container } = renderWithProviders(<SideBySideDiffChunk {...readOnlyProps} />);
+
+    const rows = container.querySelectorAll('[data-diff-line-row="true"]');
+    fireEvent.mouseEnter(rows[2]!.children[2]!);
+    expect(screen.queryByRole('button', { name: 'Add a comment' })).not.toBeInTheDocument();
+
+    fireEvent.click(rows[0]!.children[2]!);
+    fireEvent.click(rows[2]!.children[2]!, { shiftKey: true });
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  });
+});

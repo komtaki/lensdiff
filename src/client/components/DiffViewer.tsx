@@ -29,7 +29,7 @@ interface DiffViewerProps {
   collapsedFiles: Set<string>;
   onToggleCollapsed: (path: string) => void;
   onToggleAllCollapsed: (shouldCollapse: boolean) => void;
-  onAddComment: (
+  onAddComment?: (
     file: string,
     line: LineNumber,
     body: string,
@@ -246,7 +246,7 @@ export const DiffViewer = memo(function DiffViewer({
   const handleAddComment = useCallback(
     async (line: LineNumber, body: string, codeContent?: string, side?: DiffSide) => {
       try {
-        await onAddComment(file.path, line, body, codeContent, side);
+        await onAddComment?.(file.path, line, body, codeContent, side);
       } catch (error) {
         console.error('Failed to add comment:', error);
       }
@@ -348,7 +348,7 @@ export const DiffViewer = memo(function DiffViewer({
     isExpandLoading,
     expandHiddenLines: expandLines,
     expandAllBetweenChunks,
-    onAddComment: handleAddComment,
+    onAddComment: onAddComment ? handleAddComment : undefined,
     onGenerateThreadPrompt,
     onRemoveThread,
     onReplyToThread,
