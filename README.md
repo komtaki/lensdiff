@@ -26,6 +26,7 @@ What it adds:
   ![Symbol panel](docs/images/symbol-panel.png)
 
 - **Whole files**: the **Show Full File** checkbox in the header (on by default) shows whole files without folding unchanged lines. Uncheck it to fold unchanged lines down to the `--context` lines around each change (git's default 3 when `--context` is not given). Whole files no longer need `--context 100000`. The choice is saved with the other UI settings. It has no effect with `--pr` or stdin.
+- **Agent skills**: the fork ships its own agent skills, `lensdiff` and `lensdiff-review` (the latter documents the overview rendering and comment kinds). Install them with `npx skills add komtaki/lensdiff`; upstream's `yoshiko-pg/difit` skills do not know these features.
 
 Example finding:
 

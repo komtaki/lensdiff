@@ -57,6 +57,7 @@ This is useful for review findings, explanations, and any context the user shoul
 - Use `position.side: "old"` for lines that exist only on the deleted side.
 - Use range comments for issues that span multiple lines.
 - Never copy secrets, tokens, passwords, API keys, private keys, or other credential-like material from the diff into `--comment` bodies or any command-line arguments.
+- For `--overview` and the comment `kind` field (`explanation`, `finding`), see "Overview and Comment Kinds" in the `lensdiff-review` skill (`skills/lensdiff-review/SKILL.md`).
 
 ## Including Untracked Files
 
