@@ -25,6 +25,7 @@ The final command typically looks like this:
 
 ```bash
 <lensdiff-command> <target> [compare-with] \
+  --overview <overview.md> \
   --comment '{"type":"thread","filePath":"src/foobar.ts","position":{"side":"old","line":102},"body":"line 1\nline 2"}' \
   --comment '{"type":"thread","filePath":"src/example.ts","position":{"side":"new","line":{"start":36,"end":39}},"body":"Range comment for L36-L39"}'
 ```
@@ -43,9 +44,10 @@ The detailed procedure is as follows.
   - Keep at most one live lensdiff server per Git root and review target. If a lensdiff server you started earlier is still running for the same target, do not launch another or reopen its URL; add the new findings to it with `<lensdiff-command> comment add --port <port> '<json>'` (same JSON shape as `--comment`) and let the open page pick them up.
   - If review rounds are expected to repeat, launch with `--keep-alive` or `--background` (a detached keep-alive server that prints JSON connection info such as `{"port":4966,"url":"http://localhost:4966","pid":123}` without auto-opening a browser), then use `comment add` / `comment get --port <port>` for later rounds.
 - **lensdiff launch options**
-  - Use `<lensdiff-command> <target> [compare-with]` to specify the target diff.
-  - For uncommitted changes use `<lensdiff-command> .`, for working tree changes use `<lensdiff-command> working`, and for staged changes use `<lensdiff-command> staged`.
-  - For stdin input, use a form such as `diff -u file1.txt file2.txt | <lensdiff-command>`.
+  - Every launch that opens a diff requires `--overview <overview.md>` and at least one `--comment`, including `--background` and stdin input. Without them lensdiff prints an error and exits without starting the server. Write the overview markdown first, and pass `--comment '[]'` when there are no comments to attach. `--pr <url>` does not require them.
+  - Use `<lensdiff-command> <target> [compare-with] --overview <overview.md> --comment ...` to specify the target diff.
+  - For uncommitted changes use `<lensdiff-command> .`, for working tree changes use `<lensdiff-command> working`, and for staged changes use `<lensdiff-command> staged`, each with `--overview` and `--comment`.
+  - For stdin input, use a form such as `diff -u file1.txt file2.txt | <lensdiff-command> --overview <overview.md> --comment ...`.
 - **Comment arguments**
   - Use `type: "thread"` for each comment.
   - Write comment bodies in the language the user is using.

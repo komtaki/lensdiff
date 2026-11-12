@@ -142,7 +142,8 @@ git diff --cached | difit -
 | `[compare-with]`      | -              | 비교할 선택적 두 번째 커밋 (둘 사이의 diff 표시)                                              |
 | `--merge-base`        | false          | diff 전에 `git merge-base` 로 기준 쪽을 해석 (Git revision 모드 전용)                         |
 | `--pr <url>`          | -              | 검토할 GitHub PR URL (예: https://github.com/owner/repo/pull/123)                             |
-| `--comment <json>`    | -              | 초기 코멘트 주입 (반복 가능; JSON object 또는 array 허용)                                     |
+| `--comment <json>`    | -              | 초기 코멘트 주입 (반복 가능; JSON object 또는 array 허용). `--pr` 이외에는 1개 이상 필수      |
+| `--overview <file>`   | -              | markdown 파일을 변경 개요로 표시. `--pr` 이외에는 필수                                        |
 | `--port`              | 4966           | 선호 포트; 사용 중인 경우 +1로 대체                                                           |
 | `--host`              | 127.0.0.1      | 서버를 바인딩할 호스트 주소 (외부 액세스는 0.0.0.0 사용)                                      |
 | `--no-open`           | false          | 브라우저를 자동으로 열지 않음                                                                 |

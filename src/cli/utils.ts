@@ -175,6 +175,24 @@ export function parseCommentOptions(commentValues: string[]): CommentImport[] {
   return commentValues.flatMap((value) => parseCommentImportValue(value));
 }
 
+export function validateReviewMaterialOptions(options: { overview?: string; comment: string[] }): {
+  valid: boolean;
+  error?: string;
+} {
+  const missingOptions = [
+    ...(options.overview === undefined ? ['--overview'] : []),
+    ...(options.comment.length === 0 ? ['--comment'] : []),
+  ];
+  if (missingOptions.length === 0) {
+    return { valid: true };
+  }
+
+  return {
+    valid: false,
+    error: `Missing required option(s): ${missingOptions.join(', ')}. Launch with --overview <overview.md> --comment "$(cat <explanations.json>)" (pass --comment '[]' when no hunk needs an explanation).`,
+  };
+}
+
 export function validateDiffArguments(
   targetCommitish: string,
   baseCommitish?: string,

@@ -7,6 +7,7 @@ import {
   shouldReadStdin,
   validateCommitish,
   validateDiffArguments,
+  validateReviewMaterialOptions,
 } from './utils';
 
 describe('CLI Utils', () => {
@@ -433,6 +434,46 @@ describe('CLI Utils', () => {
         expect(validateDiffArguments('a1b2c3d4e5f6789012345678901234567890abcd^', 'HEAD')).toEqual({
           valid: true,
         });
+      });
+    });
+  });
+
+  describe('validateReviewMaterialOptions', () => {
+    const howToFix =
+      'Launch with --overview <overview.md> --comment "$(cat <explanations.json>)" (pass --comment \'[]\' when no hunk needs an explanation).';
+
+    it('accepts an overview with at least one comment', () => {
+      expect(validateReviewMaterialOptions({ overview: 'overview.md', comment: ['{}'] })).toEqual({
+        valid: true,
+      });
+    });
+
+    it('accepts an empty comment array', () => {
+      expect(validateReviewMaterialOptions({ overview: 'overview.md', comment: ['[]'] })).toEqual({
+        valid: true,
+      });
+    });
+
+    it.each([
+      {
+        name: 'both options are missing',
+        options: { comment: [] },
+        missing: '--overview, --comment',
+      },
+      {
+        name: 'only --overview is missing',
+        options: { comment: ['[]'] },
+        missing: '--overview',
+      },
+      {
+        name: 'only --comment is missing',
+        options: { overview: 'overview.md', comment: [] },
+        missing: '--comment',
+      },
+    ])('rejects when $name', ({ options, missing }) => {
+      expect(validateReviewMaterialOptions(options)).toEqual({
+        valid: false,
+        error: `Missing required option(s): ${missing}. ${howToFix}`,
       });
     });
   });

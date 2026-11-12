@@ -28,25 +28,28 @@ Manual verification of whether the page launched correctly is also unnecessary.
 
 ## Commands
 
-- Review uncommitted changes before commit: `<lensdiff-command> .`
-- Review the HEAD commit: `<lensdiff-command>`
-- Review staging area changes: `<lensdiff-command> staged`
-- Review unstaged changes only: `<lensdiff-command> working`
+Every launch that opens a diff (Git revisions, `.` / `working` / `staged`, the HEAD default, and stdin, including `--background`) requires `--overview <file>` and at least one `--comment`. Without them lensdiff prints an error and exits with a non-zero code without starting the server. Write the overview markdown and the explanation comments first (see "Overview and Comment Kinds"), then launch. Pass `--comment '[]'` when no hunk needs an explanation. `--pr <url>` and the subcommands do not require them.
+
+- Review uncommitted changes before commit: `<lensdiff-command> . --overview <overview.md> --comment "$(cat <explanations.json>)"`
+- Review the HEAD commit: `<lensdiff-command> --overview <overview.md> --comment "$(cat <explanations.json>)"`
+- Review staging area changes: `<lensdiff-command> staged --overview <overview.md> --comment "$(cat <explanations.json>)"`
+- Review unstaged changes only: `<lensdiff-command> working --overview <overview.md> --comment "$(cat <explanations.json>)"`
 
 Basic Usage:
 
 ```bash
-<lensdiff-command> <target>                    # View single commit diff. ex: lensdiff 6f4a9b7
-<lensdiff-command> <target> [compare-with]     # Compare two commits/branches. ex: lensdiff feature main
+<lensdiff-command> <target> --overview <overview.md> --comment "$(cat <explanations.json>)"                  # View single commit diff. ex: lensdiff 6f4a9b7 ...
+<lensdiff-command> <target> [compare-with] --overview <overview.md> --comment "$(cat <explanations.json>)"   # Compare two commits/branches. ex: lensdiff feature main ...
 ```
 
-## Optional Startup Comments
+## Startup Comments
 
-If there is something you want to tell the user when lensdiff opens, attach it as startup comments with `--comment`.
+Attach what you want to tell the user when lensdiff opens as startup comments with `--comment`. At least one `--comment` is required.
 This is useful for review findings, explanations, and any context the user should see directly on the diff.
 
 ```bash
 <lensdiff-command> <target> [compare-with] \
+  --overview <overview.md> \
   --comment '{"type":"thread","filePath":"src/foobar.ts","position":{"side":"old","line":102},"body":"line 1\nline 2"}' \
   --comment '{"type":"thread","filePath":"src/example.ts","position":{"side":"new","line":{"start":36,"end":39}},"body":"Range comment for L36-L39"}'
 ```
@@ -60,7 +63,7 @@ This is useful for review findings, explanations, and any context the user shoul
 
 ## Overview and Comment Kinds
 
-`--overview <file>` shows a markdown file in the Overview tab. To replace it on a running server, use `<lensdiff-command> overview set --port <port> [file]` (reads stdin when `file` is omitted).
+`--overview <file>` (required, as is `--comment`) shows a markdown file in the Overview tab. To replace it on a running server, use `<lensdiff-command> overview set --port <port> [file]` (reads stdin when `file` is omitted).
 
 - Markdown is rendered with GitHub Flavored Markdown. Raw HTML (including inline SVG) is not rendered.
 - A fenced code block with the language `mermaid` renders as a diagram.
@@ -113,7 +116,7 @@ With `--background`, the server's stdout is discarded, so nothing is printed to 
 For uncommitted changes, if files not yet added to git should also appear in the diff, add `--include-untracked`.
 
 ```bash
-<lensdiff-command> . --include-untracked
+<lensdiff-command> . --include-untracked --overview <overview.md> --comment "$(cat <explanations.json>)"
 ```
 
 ## Reusing a Running Server

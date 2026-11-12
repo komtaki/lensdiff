@@ -75,7 +75,16 @@ async function startDifitServer(size, options = {}) {
 
   const difitProcess = spawn(
     'node',
-    [difitBinaryPath, '--port', config.port.toString(), '--no-open'],
+    [
+      difitBinaryPath,
+      '--port',
+      config.port.toString(),
+      '--no-open',
+      '--overview',
+      '/dev/null',
+      '--comment',
+      '[]',
+    ],
     {
       env: { ...process.env, NODE_ENV: 'production' },
     },

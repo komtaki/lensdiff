@@ -12,6 +12,12 @@ lensdiff is a fork of [difit](https://github.com/yoshiko-pg/difit), extended for
 
 What it adds:
 
+- **Review materials are required**: every launch that opens a diff (Git revisions, `.` / `working` / `staged`, the HEAD default, and stdin, with or without `--background`) requires `--overview <file>` and at least one `--comment`. Without them lensdiff prints an error and exits with a non-zero code without starting the server. `--comment '[]'` satisfies the requirement when no hunk needs an explanation. `--pr <url>`, the subcommands, `--help`, and `--version` are not checked. The upstream examples below omit these options; add them when you run lensdiff.
+
+  ```bash
+  lensdiff . origin/main --merge-base --overview overview.md --comment "$(cat explanations.json)"
+  ```
+
 - **Overview tab**: show a markdown summary of the change with `--overview <file>`, or replace it on a running server with `lensdiff overview set --port <port> [file]` (reads stdin when `file` is omitted).
 
   ![Overview tab](docs/images/overview.png)
@@ -63,7 +69,7 @@ git clone https://github.com/komtaki/lensdiff.git
 cd lensdiff
 pnpm install
 pnpm build
-node dist/cli/index.js
+node dist/cli/index.js --overview overview.md --comment "$(cat explanations.json)"
 ```
 
 The rest of this README is upstream's documentation. Read `difit` as `lensdiff` there.
@@ -198,21 +204,22 @@ Stdin mode is selected with intent-first rules:
 
 ## ⚙️ CLI Options
 
-| Flag                  | Default         | Description                                                                                             |
-| --------------------- | --------------- | ------------------------------------------------------------------------------------------------------- |
-| `<target>`            | HEAD            | Commit hash, tag, HEAD~n, branch, or special arguments                                                  |
-| `[compare-with]`      | -               | Optional second commit to compare with (shows diff between the two)                                     |
-| `--merge-base`        | false           | Resolve the base revision with `git merge-base` before diffing (Git revision mode only)                 |
-| `--pr <url>`          | -               | GitHub PR URL to review (e.g., https://github.com/owner/repo/pull/123)                                  |
-| `--comment <json>`    | -               | Inject initial comments (repeatable; accepts a JSON object or array)                                    |
-| `--port`              | 4966            | Preferred port; falls back to +1 if occupied                                                            |
-| `--host`              | 127.0.0.1       | Host address to bind server to (use 0.0.0.0 for external access)                                        |
-| `--no-open`           | false           | Don't automatically open browser                                                                        |
-| `--clean`             | false           | Clear all existing comments and viewed files on startup                                                 |
-| `--include-untracked` | false           | Automatically include untracked files in diff (only with `.` or `working`)                              |
-| `--keep-alive`        | false           | Keep server running after browser disconnects (stop manually with Ctrl+C)                               |
-| `--background`        | false           | Keep the server running in the background and output JSON connection info                               |
-| `--context <lines>`   | git default (3) | Limit surrounding context lines per change (`0` shows changes only; not available with `--pr` or stdin) |
+| Flag                  | Default         | Description                                                                                                     |
+| --------------------- | --------------- | --------------------------------------------------------------------------------------------------------------- |
+| `<target>`            | HEAD            | Commit hash, tag, HEAD~n, branch, or special arguments                                                          |
+| `[compare-with]`      | -               | Optional second commit to compare with (shows diff between the two)                                             |
+| `--merge-base`        | false           | Resolve the base revision with `git merge-base` before diffing (Git revision mode only)                         |
+| `--pr <url>`          | -               | GitHub PR URL to review (e.g., https://github.com/owner/repo/pull/123)                                          |
+| `--comment <json>`    | -               | Inject initial comments (repeatable; accepts a JSON object or array). Required at least once except with `--pr` |
+| `--overview <file>`   | -               | Show a markdown file as the change overview. Required except with `--pr`                                        |
+| `--port`              | 4966            | Preferred port; falls back to +1 if occupied                                                                    |
+| `--host`              | 127.0.0.1       | Host address to bind server to (use 0.0.0.0 for external access)                                                |
+| `--no-open`           | false           | Don't automatically open browser                                                                                |
+| `--clean`             | false           | Clear all existing comments and viewed files on startup                                                         |
+| `--include-untracked` | false           | Automatically include untracked files in diff (only with `.` or `working`)                                      |
+| `--keep-alive`        | false           | Keep server running after browser disconnects (stop manually with Ctrl+C)                                       |
+| `--background`        | false           | Keep the server running in the background and output JSON connection info                                       |
+| `--context <lines>`   | git default (3) | Limit surrounding context lines per change (`0` shows changes only; not available with `--pr` or stdin)         |
 
 ## 💬 Comment System
 
