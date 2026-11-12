@@ -57,7 +57,37 @@ This is useful for review findings, explanations, and any context the user shoul
 - Use `position.side: "old"` for lines that exist only on the deleted side.
 - Use range comments for issues that span multiple lines.
 - Never copy secrets, tokens, passwords, API keys, private keys, or other credential-like material from the diff into `--comment` bodies or any command-line arguments.
-- For `--overview` and the comment `kind` field (`explanation`, `finding`), see "Overview and Comment Kinds" in the `lensdiff-review` skill (`skills/lensdiff-review/SKILL.md`).
+
+## Overview and Comment Kinds
+
+`--overview <file>` shows a markdown file in the Overview tab. To replace it on a running server, use `<lensdiff-command> overview set --port <port> [file]` (reads stdin when `file` is omitted).
+
+- Markdown is rendered with GitHub Flavored Markdown. Raw HTML (including inline SVG) is not rendered.
+- A fenced code block with the language `mermaid` renders as a diagram.
+- Inline code of the form `` `path/to/file.ext:line` `` becomes a button that jumps to that line when the file is in the diff. Ranges such as `:10-20` are not linked.
+
+Every `--comment` / `comment add` thread accepts an optional `kind`:
+
+- `comment` (default): a plain comment, always printed on exit.
+- `explanation`: a code explanation. Printed on exit only when the user replied to it.
+- `finding`: a review finding. Requires `reviewer`, `severity` (`info` | `warn` | `error`), and `title`; these fields are rejected for other kinds. The user can adopt or reject it. Printed on exit when adopted (the root body is prefixed with `[AI:<reviewer>] `) or replied to.
+
+```json
+{"type":"thread","kind":"explanation","filePath":"src/api.ts","position":{"side":"new","line":{"start":10,"end":18}},"body":"Validates the body before the handler runs."}
+```
+
+```json
+{"type":"thread","kind":"finding","reviewer":"security","severity":"warn","title":"Unvalidated input","filePath":"src/api.ts","position":{"side":"new","line":42},"body":"What happens, when, and how to fix it."}
+```
+
+Line numbers refer to the diff as of launch. After new commits, take them again from the current files before relaunching or adding comments.
+
+### Output on Exit
+
+lensdiff exits with code 0 when the user closes the tab (without `--keep-alive`) or presses Approve (even with `--keep-alive`). Before exiting it prints to stdout:
+
+- `📝 Comments from review session:` followed by the threads selected by the rules above, only when at least one thread is selected. With none, the header is omitted.
+- `✅ Approved` as the last line when the user pressed Approve, whether or not comments were printed. It means the comments only need fixing, with no further review round.
 
 ## Including Untracked Files
 

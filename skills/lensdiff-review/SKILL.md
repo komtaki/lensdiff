@@ -62,24 +62,4 @@ The detailed procedure is as follows.
 
 ## Overview and Comment Kinds
 
-`--overview <file>` shows a markdown file in the Overview tab. To replace it on a running server, use `<lensdiff-command> overview set --port <port> [file]` (reads stdin when `file` is omitted).
-
-- Markdown is rendered with GitHub Flavored Markdown. Raw HTML (including inline SVG) is not rendered.
-- A fenced code block with the language `mermaid` renders as a diagram.
-- Inline code of the form `` `path/to/file.ext:line` `` becomes a button that jumps to that line when the file is in the diff. Ranges such as `:10-20` are not linked.
-
-Every `--comment` / `comment add` thread accepts an optional `kind`:
-
-- `comment` (default): a plain comment, always printed on exit.
-- `explanation`: a code explanation. Printed on exit only when the user replied to it.
-- `finding`: a review finding. Requires `reviewer`, `severity` (`info` | `warn` | `error`), and `title`; these fields are rejected for other kinds. The user can adopt or reject it. Printed on exit when adopted (the root body is prefixed with `[AI:<reviewer>] `) or replied to.
-
-```json
-{"type":"thread","kind":"explanation","filePath":"src/api.ts","position":{"side":"new","line":{"start":10,"end":18}},"body":"Validates the body before the handler runs."}
-```
-
-```json
-{"type":"thread","kind":"finding","reviewer":"security","severity":"warn","title":"Unvalidated input","filePath":"src/api.ts","position":{"side":"new","line":42},"body":"What happens, when, and how to fix it."}
-```
-
-Line numbers refer to the diff as of launch. After new commits, take them again from the current files before relaunching or adding comments.
+See "Overview and Comment Kinds" in the `lensdiff` skill for `--overview`, the comment `kind` field, and the exit output.
