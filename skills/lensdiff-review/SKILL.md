@@ -59,3 +59,7 @@ The detailed procedure is as follows.
 3. Share the lensdiff URL and finish the response.
    - If there were no comments to attach, explicitly say so.
    - No manual verification of the launched lensdiff page is required.
+
+## Overview and Comment Kinds
+
+See "Overview and Comment Kinds" in the `lensdiff` skill for `--overview`, the comment `kind` field, and the exit output.

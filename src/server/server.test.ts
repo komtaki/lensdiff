@@ -224,10 +224,15 @@ describe('Server Integration Tests', () => {
       messages: [{ id, body, createdAt: isoNow, updatedAt: isoNow }],
     });
 
-    const postThreads = (port: number, threads: unknown[], baseVersion?: number) =>
+    const postThreads = (
+      port: number,
+      threads: unknown[],
+      baseVersion?: number,
+      contentType = 'application/json',
+    ) =>
       fetch(`http://localhost:${port}/api/comments`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': contentType },
         body: JSON.stringify({ threads, baseVersion }),
       });
 
@@ -238,6 +243,38 @@ describe('Server Integration Tests', () => {
         threads: Array<{ id: string; filePath: string }>;
       };
     };
+
+    const makeLargeThreads = () =>
+      Array.from({ length: 80 }, (_, index) =>
+        makeThread(`large-${index}`, `src/file-${index}.ts`, index + 1, 'x'.repeat(2500)),
+      );
+
+    it.each(['application/json', 'text/plain;charset=UTF-8'])(
+      'accepts a %s body for a comment sync larger than the default 100kb limit',
+      async (contentType) => {
+        const port = await getAvailablePort(4966);
+        const result = await startServer({
+          preferredPort: port,
+          openBrowser: false,
+        });
+
+        try {
+          const threads = makeLargeThreads();
+          expect(JSON.stringify({ threads }).length).toBeGreaterThan(102400);
+
+          const response = await postThreads(result.port, threads, undefined, contentType);
+
+          expect(response.status).toBe(200);
+          expect((await getSession(result.port)).threads).toHaveLength(threads.length);
+        } finally {
+          if (result.server) {
+            await new Promise<void>((resolve) => {
+              result.server!.close(() => resolve());
+            });
+          }
+        }
+      },
+    );
 
     it('merges concurrent agent additions instead of clobbering on a stale push', async () => {
       const port = await getAvailablePort(4966);
