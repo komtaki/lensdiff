@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { HotkeysProvider } from 'react-hotkeys-hook';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom';
@@ -1027,15 +1028,14 @@ describe('App Component - Revision-aware refetching', () => {
     renderApp();
 
     fireEvent.click(await screen.findByRole('button', { name: /Revision menu:/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Previous commit' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'HEAD...Uncommitted (merge-base)' }));
 
     await waitFor(() => {
       const diffCalls = vi
         .mocked(global.fetch)
         .mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/diff'));
       expect(diffCalls).toHaveLength(2);
-      expect(String(diffCalls[1]?.[0])).toContain('base=HEAD%5E%5E');
-      expect(String(diffCalls[1]?.[0])).toContain('target=HEAD%5E');
+      expect(String(diffCalls[1]?.[0])).toContain('base=HEAD&target=.&baseMode=merge-base');
     });
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Ignore Whitespace' }));
@@ -1045,8 +1045,7 @@ describe('App Component - Revision-aware refetching', () => {
         .mocked(global.fetch)
         .mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/diff'));
       expect(diffCalls).toHaveLength(3);
-      expect(String(diffCalls[2]?.[0])).toContain('base=HEAD%5E%5E');
-      expect(String(diffCalls[2]?.[0])).toContain('target=HEAD%5E');
+      expect(String(diffCalls[2]?.[0])).toContain('base=HEAD&target=.&baseMode=merge-base');
     });
   });
 });
@@ -1817,15 +1816,16 @@ describe('App Component - Commit view', () => {
       .mock.calls.map(([url]) => String(url))
       .filter((url) => url.startsWith(path));
 
-  const selectCommit = (hash: string) =>
-    fireEvent.change(screen.getByRole('combobox', { name: 'Commits' }), {
-      target: { value: hash },
-    });
+  const secondCommitName = /2\. ccccccc Second change/;
+  const selectScope = (name: string | RegExp) =>
+    fireEvent.click(screen.getByRole('radio', { name }));
+  const expectSelected = (name: string | RegExp) =>
+    expect(screen.getByRole('radio', { name })).toHaveAttribute('aria-checked', 'true');
 
   const openSecondCommit = async () => {
     renderApp();
-    await screen.findByRole('option', { name: /2\. ccccccc Second change/ });
-    selectCommit(secondCommit.hash);
+    await screen.findByRole('radio', { name: secondCommitName });
+    selectScope(secondCommitName);
     await screen.findByTitle('commit-only.ts');
   };
 
@@ -1843,18 +1843,20 @@ describe('App Component - Commit view', () => {
   it('shows one commit read-only while keeping comments bound to the whole diff', async () => {
     renderApp();
     expect(await screen.findByRole('tab', { name: 'Overview' })).toBeInTheDocument();
-    expect(await screen.findByRole('option', { name: /2\. ccccccc Second change/ })).toBeVisible();
+    await screen.findByRole('radio', { name: secondCommitName });
+    expectSelected('All changes');
+    expect(screen.getByText('Commits (2)')).toBeInTheDocument();
     expect(screen.getByTitle(/Copy all \d+ comments/)).toBeInTheDocument();
     expect(screen.getByText('0 / 1 files viewed')).toBeInTheDocument();
 
-    selectCommit(secondCommit.hash);
+    selectScope(secondCommitName);
 
     expect(await screen.findByTitle('commit-only.ts')).toBeInTheDocument();
     expect(getFetchedUrls('/api/commit-diff')).toEqual([
       `/api/commit-diff?hash=${secondCommit.hash}&ignoreWhitespace=true&showFullFile=true`,
     ]);
-    expect(screen.getByRole('combobox', { name: 'Commits' })).toHaveValue(secondCommit.hash);
-    expect(screen.getByText(/Read-only: switch to All changes/)).toBeInTheDocument();
+    expectSelected(secondCommitName);
+    expect(screen.getByText('Read-only')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
     expect(screen.queryByTitle(/Copy all \d+ comments/)).not.toBeInTheDocument();
@@ -1897,19 +1899,19 @@ describe('App Component - Commit view', () => {
     await waitFor(() => expect(getFetchedUrls('/api/commit-diff')).toHaveLength(2));
     expect(getFetchedUrls('/api/diff')).toHaveLength(2);
     expect(screen.getByTitle('commit-only.ts')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Commits' })).toHaveValue(secondCommit.hash);
+    expectSelected(secondCommitName);
   });
 
   it('returns to the whole diff with its review UI on All changes', async () => {
     await openSecondCommit();
 
-    selectCommit('');
+    selectScope('All changes');
 
     expect(await screen.findByTitle('test.ts')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
     expect(screen.getByTitle(/Copy all \d+ comments/)).toBeInTheDocument();
-    expect(screen.queryByText(/Read-only: switch to All changes/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Read-only')).not.toBeInTheDocument();
     expect(getFetchedUrls('/api/diff')).toHaveLength(1);
   });
 
@@ -1923,13 +1925,13 @@ describe('App Component - Commit view', () => {
       { '/api/commit-diff': 404 },
     );
     renderApp();
-    await screen.findByRole('option', { name: /2\. ccccccc Second change/ });
+    await screen.findByRole('radio', { name: secondCommitName });
 
-    selectCommit(secondCommit.hash);
+    selectScope(secondCommitName);
 
     await waitFor(() => expect(getFetchedUrls('/api/commit-diff')).toHaveLength(1));
     expect(await screen.findByTitle('test.ts')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Commits' })).toHaveValue('');
+    expectSelected('All changes');
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
   });
 
@@ -1943,6 +1945,32 @@ describe('App Component - Commit view', () => {
 
     expect(await screen.findByTitle('test.ts')).toBeInTheDocument();
     await waitFor(() => expect(getFetchedUrls('/api/commits')).toHaveLength(1));
-    expect(screen.queryByRole('combobox', { name: 'Commits' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: 'Commits' })).not.toBeInTheDocument();
+  });
+
+  it('steps through commits with Shift+J and Shift+K and stops at the ends', async () => {
+    const user = userEvent.setup();
+    mockReviewFetch({
+      ...commitViewRoutes,
+      '/api/commit-diff': { ...commitDiffResponse, commitScope: firstCommit.hash },
+    });
+    renderApp();
+    await screen.findByRole('radio', { name: secondCommitName });
+
+    await user.keyboard('{Shift>}k{/Shift}');
+    expect(getFetchedUrls('/api/commit-diff')).toHaveLength(0);
+
+    await user.keyboard('{Shift>}j{/Shift}');
+    await waitFor(() =>
+      expect(getFetchedUrls('/api/commit-diff')).toEqual([
+        `/api/commit-diff?hash=${firstCommit.hash}&ignoreWhitespace=true&showFullFile=true`,
+      ]),
+    );
+    await screen.findByTitle('commit-only.ts');
+    expectSelected(/1\. aaaaaaa First change/);
+
+    await user.keyboard('{Shift>}k{/Shift}');
+    expect(await screen.findByTitle('test.ts')).toBeInTheDocument();
+    expectSelected('All changes');
   });
 });

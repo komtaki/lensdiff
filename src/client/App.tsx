@@ -6,8 +6,10 @@ import {
   PanelLeft,
   Keyboard,
   Check,
+  Lock,
 } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useHotkeys } from 'react-hotkeys-hook';
 
 import {
   type DiffCommentThread,
@@ -1113,6 +1115,29 @@ function App() {
   );
 
   const rangeCommits = useRangeCommits(resolvedSelectionKey);
+  const canSwitchCommits = rangeCommits.length > 1;
+
+  const selectAdjacentCommit = useCallback(
+    (step: 1 | -1) => {
+      if (!canSwitchCommits) return;
+      const scopeHashes = [null, ...rangeCommits.map((commit) => commit.hash)];
+      const nextHash = scopeHashes[scopeHashes.indexOf(selectedCommitHashRef.current) + step];
+      if (nextHash !== undefined) {
+        handleCommitScopeChange(nextHash);
+      }
+    },
+    [canSwitchCommits, handleCommitScopeChange, rangeCommits],
+  );
+  // [ and ] already move between files, so commits use Shift with the j/k next/previous convention.
+  const commitHotkeyOptions = {
+    scopes: 'navigation',
+    enableOnFormTags: false,
+    preventDefault: true,
+  };
+  useHotkeys('shift+j', () => selectAdjacentCommit(1), commitHotkeyOptions, [selectAdjacentCommit]);
+  useHotkeys('shift+k', () => selectAdjacentCommit(-1), commitHotkeyOptions, [
+    selectAdjacentCommit,
+  ]);
 
   // Clear comments and viewed files on initial load if requested via CLI flag
   const hasCleanedRef = useRef(false);
@@ -1708,18 +1733,6 @@ function App() {
                   </div>
                 </div>
               )}
-              {isCommitView && (
-                <span className="text-xs text-github-warning">
-                  Read-only: switch to All changes to comment or approve
-                </span>
-              )}
-              {rangeCommits.length > 1 && (
-                <CommitScopeSelector
-                  commits={rangeCommits}
-                  selectedHash={selectedCommitHash}
-                  onSelect={handleCommitScopeChange}
-                />
-              )}
               {revisionOptions ? (
                 <DiffQuickMenu
                   options={revisionOptions}
@@ -1747,6 +1760,15 @@ function App() {
                       displayedDiffData.commit
                     )}
                   </code>
+                </span>
+              )}
+              {isCommitView && (
+                <span
+                  className="flex items-center gap-1 text-xs text-github-warning"
+                  title="Viewing one commit. Choose All changes under Commits to comment or approve."
+                >
+                  <Lock size={12} aria-hidden="true" />
+                  Read-only
                 </span>
               )}
               {displayedDiffData.approveAvailable !== false && (
@@ -1826,6 +1848,13 @@ function App() {
                   : undefined,
               }}
             >
+              {canSwitchCommits && (
+                <CommitScopeSelector
+                  commits={rangeCommits}
+                  selectedHash={selectedCommitHash}
+                  onSelect={handleCommitScopeChange}
+                />
+              )}
               <div className="flex-1 overflow-y-auto">
                 <FileList
                   files={displayedDiffData.files}

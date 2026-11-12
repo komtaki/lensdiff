@@ -119,6 +119,40 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
 
           <section>
             <h3 className="text-sm font-semibold text-github-text-primary mb-2">
+              Commit Navigation
+            </h3>
+            <div className="space-y-1">
+              <div className="flex justify-between text-sm">
+                <div className="flex items-center gap-1">
+                  <kbd className="px-2 py-1 bg-github-bg-tertiary border border-github-border rounded text-github-text-primary font-mono">
+                    Shift
+                  </kbd>
+                  <span className="text-github-text-muted">+</span>
+                  <kbd className="px-2 py-1 bg-github-bg-tertiary border border-github-border rounded text-github-text-primary font-mono">
+                    J
+                  </kbd>
+                </div>
+                <span className="text-github-text-secondary">
+                  Next commit (All changes → 1 → 2 …)
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <div className="flex items-center gap-1">
+                  <kbd className="px-2 py-1 bg-github-bg-tertiary border border-github-border rounded text-github-text-primary font-mono">
+                    Shift
+                  </kbd>
+                  <span className="text-github-text-muted">+</span>
+                  <kbd className="px-2 py-1 bg-github-bg-tertiary border border-github-border rounded text-github-text-primary font-mono">
+                    K
+                  </kbd>
+                </div>
+                <span className="text-github-text-secondary">Previous commit</span>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h3 className="text-sm font-semibold text-github-text-primary mb-2">
               Chunk Navigation
             </h3>
             <div className="space-y-1">

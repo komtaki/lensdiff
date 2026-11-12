@@ -12,8 +12,8 @@ import {
   FloatingPortal,
   safePolygon,
 } from '@floating-ui/react';
-import { ChevronDown, ChevronLeft, GitBranch, Search } from 'lucide-react';
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { ChevronDown, GitBranch, Search } from 'lucide-react';
+import { useMemo, useState, type KeyboardEvent } from 'react';
 
 import { type CommitInfo, type DiffSelection, type RevisionsResponse } from '../../types/diff';
 import {
@@ -36,14 +36,6 @@ const SPECIAL_LABEL_OVERRIDES: Record<string, string> = {
   '.': 'Uncommitted Changes',
   staged: 'Staging Area',
   working: 'Working Directory',
-};
-
-const UNCOMMITTED_TARGETS = new Set(['.', 'staged', 'working']);
-
-export const getPreviousCommitPreset = (targetRevision: string): DiffSelection => {
-  const target =
-    !targetRevision || UNCOMMITTED_TARGETS.has(targetRevision) ? 'HEAD' : `${targetRevision}^`;
-  return createDiffSelection(`${target}^`, target);
 };
 
 const isPreviousPair = (selection: DiffSelection) => {
@@ -112,14 +104,12 @@ export function DiffQuickMenu({
   compact = false,
 }: DiffQuickMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [isCommitMenuOpen, setIsCommitMenuOpen] = useState(false);
   const [query, setQuery] = useState('');
   const isCompact = compact;
 
   const { refs, floatingStyles, context } = useFloating({
-    open: isOpen || isCommitMenuOpen,
+    open: isOpen,
     onOpenChange: (open) => {
-      if (!open && isCommitMenuOpen) return;
       setIsOpen(open);
       if (!open) setQuery('');
     },
@@ -136,39 +126,6 @@ export function DiffQuickMenu({
   const role = useRole(context, { role: 'menu' });
 
   const { getReferenceProps, getFloatingProps } = useInteractions([hover, click, dismiss, role]);
-
-  const {
-    refs: commitRefs,
-    floatingStyles: commitFloatingStyles,
-    context: commitContext,
-  } = useFloating({
-    open: isCommitMenuOpen,
-    onOpenChange: (open) => {
-      if (open) {
-        setIsOpen(true);
-      }
-      setIsCommitMenuOpen(open);
-    },
-    placement: 'left-start',
-    middleware: [offset(0), flip(), shift({ padding: 8 })],
-    whileElementsMounted: autoUpdate,
-  });
-
-  const commitHover = useHover(commitContext, {
-    handleClose: safePolygon(),
-  });
-  const commitClick = useClick(commitContext);
-  const commitDismiss = useDismiss(commitContext);
-  const commitRole = useRole(commitContext, { role: 'menu' });
-
-  const { getReferenceProps: getCommitReferenceProps, getFloatingProps: getCommitFloatingProps } =
-    useInteractions([commitHover, commitClick, commitDismiss, commitRole]);
-
-  useEffect(() => {
-    if (!isOpen) {
-      setIsCommitMenuOpen(false);
-    }
-  }, [isOpen]);
 
   const currentLabel = useMemo(() => {
     const currentSelectionIsPreviousPair = isPreviousPair(selection);
@@ -214,20 +171,13 @@ export function DiffQuickMenu({
       originDefaultBranch ? createDiffSelection(originDefaultBranch, '.', 'merge-base') : null,
     [originDefaultBranch],
   );
-  const previousCommitPreset = useMemo(
-    () => getPreviousCommitPreset(selection.targetCommitish),
-    [selection.targetCommitish],
-  );
-
   const handleSelect = (nextSelection: DiffSelection) => {
     onSelectDiff(nextSelection);
-    setIsCommitMenuOpen(false);
     setIsOpen(false);
     setQuery('');
   };
 
   const handleOpenAdvanced = () => {
-    setIsCommitMenuOpen(false);
     setIsOpen(false);
     setQuery('');
     onOpenAdvanced();
@@ -239,7 +189,7 @@ export function DiffQuickMenu({
       label: string;
       selection: DiffSelection;
     }> = [
-      { key: 'head', label: 'HEAD', selection: headPreset },
+      { key: 'head', label: 'HEAD (last commit)', selection: headPreset },
       {
         key: 'head-uncommitted',
         label: 'HEAD...Uncommitted (merge-base)',
@@ -260,11 +210,6 @@ export function DiffQuickMenu({
         selection: originUncommittedPreset,
       });
     }
-    items.push({
-      key: 'previous',
-      label: 'Previous commit',
-      selection: previousCommitPreset,
-    });
     return items;
   }, [
     headPreset,
@@ -273,7 +218,6 @@ export function DiffQuickMenu({
     mainUncommittedPreset,
     originDefaultBranch,
     originUncommittedPreset,
-    previousCommitPreset,
   ]);
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -284,20 +228,11 @@ export function DiffQuickMenu({
   const filteredPresets = isFiltering
     ? presetItems.filter((item) => matchesQuery(item.label))
     : presetItems;
-  const filteredCommits = isFiltering
-    ? options.commits.filter((commit) =>
-        matchesQuery(commit.shortHash, commit.hash, commit.message),
-      )
-    : [];
   const filteredBranches = isFiltering
     ? options.branches.filter((branch) => matchesQuery(branch.name))
     : [];
 
-  const hasNoMatches =
-    isFiltering &&
-    filteredPresets.length === 0 &&
-    filteredCommits.length === 0 &&
-    filteredBranches.length === 0;
+  const hasNoMatches = isFiltering && filteredPresets.length === 0 && filteredBranches.length === 0;
 
   const branchSelection = (branchName: string) =>
     createDiffSelection(branchName, '.', 'merge-base');
@@ -309,9 +244,6 @@ export function DiffQuickMenu({
 
     const firstMatch =
       filteredPresets[0]?.selection ??
-      (filteredCommits[0]
-        ? createDiffSelection(`${filteredCommits[0].shortHash}^`, filteredCommits[0].shortHash)
-        : undefined) ??
       (filteredBranches[0] ? branchSelection(filteredBranches[0].name) : undefined);
     if (firstMatch) {
       handleSelect(firstMatch);
@@ -339,20 +271,12 @@ export function DiffQuickMenu({
     return diffSelectionsEqual(selection, preset);
   };
 
-  const isCommitActive = (commit: CommitInfo) => {
-    if (!isPreviousPair(selection)) return false;
-    return (
-      matchesCommitish(selection.targetCommitish, commit) ||
-      matchesCommitish(resolvedTargetRevision, commit)
-    );
-  };
-
   return (
     <div className="relative">
       <button
         ref={refs.setReference}
         type="button"
-        className="flex items-center gap-1.5 cursor-pointer group"
+        className="flex min-w-0 shrink-0 items-center gap-1.5 cursor-pointer group"
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-label={`Revision menu: ${currentLabel}`}
@@ -369,7 +293,9 @@ export function DiffQuickMenu({
           </div>
         ) : (
           <div className="flex items-center gap-1 px-2 py-1 bg-github-bg-tertiary border border-github-border rounded hover:border-github-text-secondary transition-colors">
-            <code className="text-xs text-github-text-primary">{currentLabel}</code>
+            <code className="max-w-[min(40vw,36rem)] truncate whitespace-nowrap text-xs text-github-text-primary">
+              {currentLabel}
+            </code>
             <ChevronDown
               size={12}
               className="text-github-text-secondary group-hover:text-github-text-primary transition-colors"
@@ -395,8 +321,8 @@ export function DiffQuickMenu({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={handleSearchKeyDown}
-                  placeholder="Filter branches and commits..."
-                  aria-label="Filter branches and commits"
+                  placeholder="Filter ranges and branches..."
+                  aria-label="Filter ranges and branches"
                   className="w-full bg-transparent text-xs text-github-text-primary placeholder:text-github-text-muted focus:outline-none"
                 />
               </div>
@@ -407,7 +333,7 @@ export function DiffQuickMenu({
                 {filteredPresets.length > 0 && (
                   <div className="border-b border-github-border">
                     <div className="px-3 py-2 text-xs font-semibold text-github-text-secondary bg-github-bg-tertiary">
-                      Quick Diffs
+                      Review range
                     </div>
                     {filteredPresets.map((item) => (
                       <button
@@ -417,35 +343,6 @@ export function DiffQuickMenu({
                         type="button"
                       >
                         {item.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {filteredCommits.length > 0 && (
-                  <div className="border-b border-github-border">
-                    <div className="px-3 py-2 text-xs font-semibold text-github-text-secondary bg-github-bg-tertiary">
-                      Commits
-                    </div>
-                    {filteredCommits.map((commit) => (
-                      <button
-                        key={commit.hash}
-                        onClick={() =>
-                          handleSelect(
-                            createDiffSelection(`${commit.shortHash}^`, commit.shortHash),
-                          )
-                        }
-                        className={getItemClasses(isCommitActive(commit), false)}
-                        type="button"
-                      >
-                        <div className="flex items-start gap-2">
-                          <code className="text-xs text-github-text-primary font-mono whitespace-nowrap">
-                            {commit.shortHash}
-                          </code>
-                          <span className="text-xs text-github-text-secondary flex-1 break-words">
-                            {commit.message}
-                          </span>
-                        </div>
                       </button>
                     ))}
                   </div>
@@ -480,7 +377,7 @@ export function DiffQuickMenu({
 
                 {hasNoMatches && (
                   <div className="px-3 py-4 text-center text-xs text-github-text-muted">
-                    No matching branches or commits
+                    No matching ranges or branches
                   </div>
                 )}
               </>
@@ -488,45 +385,18 @@ export function DiffQuickMenu({
               <>
                 <div className="border-b border-github-border">
                   <div className="px-3 py-2 text-xs font-semibold text-github-text-secondary bg-github-bg-tertiary">
-                    Quick Diffs
+                    Review range
                   </div>
-                  {presetItems
-                    .filter((item) => item.key !== 'previous')
-                    .map((item) => (
-                      <button
-                        key={item.key}
-                        onClick={() => handleSelect(item.selection)}
-                        className={getItemClasses(isPresetActive(item.selection), false)}
-                        type="button"
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                </div>
-
-                <div className="border-b border-github-border">
-                  <button
-                    onClick={() => handleSelect(previousCommitPreset)}
-                    className={getItemClasses(isPresetActive(previousCommitPreset), false)}
-                    type="button"
-                  >
-                    Previous commit
-                  </button>
-                </div>
-
-                <div className="border-b border-github-border">
-                  <button
-                    ref={options.commits.length > 0 ? commitRefs.setReference : undefined}
-                    className={getItemClasses(false, options.commits.length === 0)}
-                    {...(options.commits.length > 0 ? getCommitReferenceProps() : {})}
-                    disabled={options.commits.length === 0}
-                    type="button"
-                  >
-                    <div className="flex items-center gap-2">
-                      <ChevronLeft size={12} className="text-github-text-secondary" />
-                      <span>Pick Commit...</span>
-                    </div>
-                  </button>
+                  {presetItems.map((item) => (
+                    <button
+                      key={item.key}
+                      onClick={() => handleSelect(item.selection)}
+                      className={getItemClasses(isPresetActive(item.selection), false)}
+                      type="button"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
                 </div>
 
                 <div>
@@ -535,45 +405,11 @@ export function DiffQuickMenu({
                     className={getItemClasses(false, false)}
                     type="button"
                   >
-                    Detailed...
+                    Custom range (Base / Target)...
                   </button>
                 </div>
               </>
             )}
-          </div>
-        </FloatingPortal>
-      )}
-
-      {isCommitMenuOpen && options.commits.length > 0 && (
-        <FloatingPortal>
-          <div
-            ref={commitRefs.setFloating}
-            style={commitFloatingStyles}
-            className="bg-github-bg-secondary border border-github-border rounded shadow-lg z-50 w-[360px] max-h-[360px] overflow-y-auto"
-            {...getCommitFloatingProps()}
-          >
-            <div className="px-3 py-2 text-xs font-semibold text-github-text-secondary bg-github-bg-tertiary">
-              Recent Commits
-            </div>
-            {options.commits.map((commit) => (
-              <button
-                key={commit.hash}
-                onClick={() =>
-                  handleSelect(createDiffSelection(`${commit.shortHash}^`, commit.shortHash))
-                }
-                className={getItemClasses(isCommitActive(commit), false)}
-                type="button"
-              >
-                <div className="flex items-start gap-2">
-                  <code className="text-xs text-github-text-primary font-mono whitespace-nowrap">
-                    {commit.shortHash}
-                  </code>
-                  <span className="text-xs text-github-text-secondary flex-1 break-words">
-                    {commit.message}
-                  </span>
-                </div>
-              </button>
-            ))}
           </div>
         </FloatingPortal>
       )}
