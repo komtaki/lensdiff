@@ -12,12 +12,6 @@ lensdiff は [difit](https://github.com/yoshiko-pg/difit) の fork で、AI エ�
 
 追加した機能は次のとおりです。
 
-- **説明資料の指定が必須**: 差分を開く起動（Git リビジョン、`.` / `working` / `staged`、既定の HEAD、stdin。`--background` の有無を問わない）では、`--overview <file>` と 1 つ以上の `--comment` が必須です。足りないとエラーを出し、サーバーを起動せずに非 0 で終了します。説明の要る hunk がないときは `--comment '[]'` で満たせます。`--pr <url>`、サブコマンド、`--help`、`--version` は検査しません。以降の upstream の例はこれらのオプションを省いているので、実行するときは付けてください。
-
-  ```bash
-  lensdiff . origin/main --merge-base --overview overview.md --comment "$(cat explanations.json)"
-  ```
-
 - **概要タブ**: `--overview <file>` で変更の概要を markdown で表示します。起動中のサーバーには `lensdiff overview set --port <port> [file]` で差し替えられます（`file` を省略すると stdin から読みます）。
 
   ![概要タブ](docs/images/overview.png)

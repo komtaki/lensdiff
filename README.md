@@ -12,12 +12,6 @@ lensdiff is a fork of [difit](https://github.com/yoshiko-pg/difit), extended for
 
 What it adds:
 
-- **Review materials are required**: every launch that opens a diff (Git revisions, `.` / `working` / `staged`, the HEAD default, and stdin, with or without `--background`) requires `--overview <file>` and at least one `--comment`. Without them lensdiff prints an error and exits with a non-zero code without starting the server. `--comment '[]'` satisfies the requirement when no hunk needs an explanation. `--pr <url>`, the subcommands, `--help`, and `--version` are not checked. The upstream examples below omit these options; add them when you run lensdiff.
-
-  ```bash
-  lensdiff . origin/main --merge-base --overview overview.md --comment "$(cat explanations.json)"
-  ```
-
 - **Overview tab**: show a markdown summary of the change with `--overview <file>`, or replace it on a running server with `lensdiff overview set --port <port> [file]` (reads stdin when `file` is omitted).
 
   ![Overview tab](docs/images/overview.png)
