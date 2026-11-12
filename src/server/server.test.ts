@@ -239,6 +239,62 @@ describe('Server Integration Tests', () => {
       };
     };
 
+    const makeLargeThreads = () =>
+      Array.from({ length: 80 }, (_, index) =>
+        makeThread(`large-${index}`, `src/file-${index}.ts`, index + 1, 'x'.repeat(2500)),
+      );
+
+    it('accepts a JSON comment sync larger than the default 100kb body limit', async () => {
+      const port = await getAvailablePort(4966);
+      const result = await startServer({
+        preferredPort: port,
+        openBrowser: false,
+      });
+
+      try {
+        const threads = makeLargeThreads();
+        expect(JSON.stringify({ threads }).length).toBeGreaterThan(102400);
+
+        const response = await postThreads(result.port, threads);
+
+        expect(response.status).toBe(200);
+        expect((await getSession(result.port)).threads).toHaveLength(threads.length);
+      } finally {
+        if (result.server) {
+          await new Promise<void>((resolve) => {
+            result.server!.close(() => resolve());
+          });
+        }
+      }
+    });
+
+    it('accepts a sendBeacon text/plain comment sync larger than the default 100kb body limit', async () => {
+      const port = await getAvailablePort(4966);
+      const result = await startServer({
+        preferredPort: port,
+        openBrowser: false,
+      });
+
+      try {
+        const threads = makeLargeThreads();
+
+        const response = await fetch(`http://localhost:${result.port}/api/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+          body: JSON.stringify({ threads }),
+        });
+
+        expect(response.status).toBe(200);
+        expect((await getSession(result.port)).threads).toHaveLength(threads.length);
+      } finally {
+        if (result.server) {
+          await new Promise<void>((resolve) => {
+            result.server!.close(() => resolve());
+          });
+        }
+      }
+    });
+
     it('merges concurrent agent additions instead of clobbering on a stale push', async () => {
       const port = await getAvailablePort(4966);
       const result = await startServer({

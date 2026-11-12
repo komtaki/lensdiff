@@ -84,6 +84,7 @@ interface ServerOptions {
 const GENERATED_STATUS_CACHE_TTL_MS = 60_000;
 const LSP_TARGET_COMMITISHES = new Set(['HEAD', 'working', '.']);
 const MAX_DIFF_CACHE_ENTRIES = 8;
+const REQUEST_BODY_LIMIT = '10mb';
 
 function createDiffCacheKey(
   selection: DiffSelection,
@@ -212,8 +213,8 @@ export async function startServer(
     return undefined;
   };
 
-  app.use(express.json());
-  app.use(express.text()); // For sendBeacon text/plain requests
+  app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+  app.use(express.text({ limit: REQUEST_BODY_LIMIT })); // For sendBeacon text/plain requests
 
   app.use((_req, res, next) => {
     res.header('Access-Control-Allow-Origin', 'http://localhost:*');
