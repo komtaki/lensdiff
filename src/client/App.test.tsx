@@ -1858,7 +1858,7 @@ describe('App Component - Commit view', () => {
     expectSelected(secondCommitName);
     expect(screen.getByText('Read-only')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
     expect(screen.queryByTitle(/Copy all \d+ comments/)).not.toBeInTheDocument();
     expect(screen.queryByText(/files viewed/)).not.toBeInTheDocument();
     expect(vi.mocked(useDiffComments)).toHaveBeenLastCalledWith(
@@ -1879,6 +1879,31 @@ describe('App Component - Commit view', () => {
       expect.anything(),
       undefined,
     );
+  });
+
+  it('keeps the review tabs on the whole diff and returns to it from a finding', async () => {
+    const timestamp = '2024-01-01T00:00:00.000Z';
+    mockComments = [
+      {
+        ...createMockThread({ id: 'f1', filePath: 'test.ts', line: 3, body: 'Body', author: 'AI' }),
+        createdAt: timestamp,
+        kind: 'finding',
+        finding: { reviewer: 'security', severity: 'error', title: 'Injection' },
+      },
+    ];
+    await openSecondCommit();
+
+    expect(screen.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'AI review (1)' }));
+    fireEvent.click(screen.getByText('Injection'));
+
+    expect(await screen.findByTitle('test.ts')).toBeInTheDocument();
+    expectSelected('All changes');
+    expect(screen.getByRole('tab', { name: 'Files changed' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
   });
 
   it('does not toggle viewed files while a commit is shown', async () => {

@@ -602,16 +602,15 @@ function App() {
     () => reviewThreads.filter((thread) => !isHiddenInDiff(thread)),
     [reviewThreads],
   );
-  const findingThreads = useMemo(() => reviewThreads.filter(isFindingThread), [reviewThreads]);
+  // The review tabs always describe the whole diff; only the diff pane follows the shown commit.
+  const findingThreads = useMemo(() => threads.filter(isFindingThread), [threads]);
   const openFindingCounts = useMemo(() => countOpenFindingsByFile(reviewThreads), [reviewThreads]);
   const openFindingCount = useMemo(
-    () => Array.from(openFindingCounts.values()).reduce((sum, count) => sum + count, 0),
-    [openFindingCounts],
+    () =>
+      Array.from(countOpenFindingsByFile(threads).values()).reduce((sum, count) => sum + count, 0),
+    [threads],
   );
-  const findingCountByReviewer = useMemo(
-    () => countFindingsByReviewer(reviewThreads),
-    [reviewThreads],
-  );
+  const findingCountByReviewer = useMemo(() => countFindingsByReviewer(threads), [threads]);
   const outputThreadCount = useMemo(
     () => selectThreadsForOutput(reviewThreads).length,
     [reviewThreads],
@@ -689,7 +688,7 @@ function App() {
   }, [commentsContextKey, fetchServerThreads, replaceThreads]);
 
   const { overview, reviewers, handleReviewContextChanged } = useReviewContext();
-  const hasReviewTabs = !isCommitView && (overview !== null || findingThreads.length > 0);
+  const hasReviewTabs = overview !== null || findingThreads.length > 0;
   const [selectedTab, setSelectedTab] = useState<ReviewTab | null>(null);
   const activeTab: ReviewTab = hasReviewTabs
     ? (selectedTab ?? (overview !== null ? 'overview' : 'files'))
@@ -1390,8 +1389,20 @@ function App() {
     }
   };
 
+  const [pendingLineInDiff, setPendingLineInDiff] = useState<{
+    filePath: string;
+    line: number;
+    side: DiffSide;
+  } | null>(null);
+
   const showLineInDiff = useCallback(
     (filePath: string, line: number, side: DiffSide = 'new') => {
+      // Findings and overview references point at the whole diff, which a single commit may not contain.
+      if (isCommitView) {
+        showWholeDiff();
+        setPendingLineInDiff({ filePath, line, side });
+        return;
+      }
       if (!displayedDiffData) return;
 
       const fileIndex = displayedDiffData.files.findIndex((file) => file.path === filePath);
@@ -1410,8 +1421,20 @@ function App() {
         }
       });
     },
-    [displayedDiffData, scrollFileIntoDiffContainer, setCursorPosition],
+    [
+      displayedDiffData,
+      isCommitView,
+      scrollFileIntoDiffContainer,
+      setCursorPosition,
+      showWholeDiff,
+    ],
   );
+
+  useEffect(() => {
+    if (!pendingLineInDiff || isCommitView) return;
+    setPendingLineInDiff(null);
+    showLineInDiff(pendingLineInDiff.filePath, pendingLineInDiff.line, pendingLineInDiff.side);
+  }, [isCommitView, pendingLineInDiff, showLineInDiff]);
 
   const handleNavigateToFinding = useCallback(
     (threadId: string) => {
@@ -1423,7 +1446,14 @@ function App() {
     [showLineInDiff, threads],
   );
 
-  const isFileInDiff = useCallback((filePath: string) => filesByPath.has(filePath), [filesByPath]);
+  const wholeDiffFilePaths = useMemo(
+    () => new Set(diffData?.files.map((file) => file.path)),
+    [diffData],
+  );
+  const isFileInDiff = useCallback(
+    (filePath: string) => wholeDiffFilePaths.has(filePath),
+    [wholeDiffFilePaths],
+  );
 
   const symbolNavigation = useSymbolNavigation();
   const { lookup: lookupSymbol } = symbolNavigation;
