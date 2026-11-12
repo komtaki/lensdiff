@@ -54,6 +54,7 @@ import {
   type DiffSelection,
   type FindingMeta,
   type GeneratedStatusResponse,
+  type RangeCommitsResponse,
   type RevisionsResponse,
   type ThreadCommentImport,
 } from '@/types/diff.js';
@@ -576,6 +577,73 @@ export async function startServer(
     } catch (error) {
       console.error('Error fetching revisions:', error);
       res.status(500).json({ error: 'Failed to fetch revisions' });
+    }
+  });
+
+  app.get('/api/commits', async (_req, res) => {
+    if (options.stdinDiff) {
+      res.json({ commits: [] } satisfies RangeCommitsResponse);
+      return;
+    }
+
+    try {
+      const commits = await parser.getRangeCommits(currentSelection);
+      const response: RangeCommitsResponse = {
+        commits: commits.map(({ hash, shortHash, subject }) => ({ hash, shortHash, subject })),
+      };
+      res.json(response);
+    } catch (error) {
+      console.error('Error fetching commits:', error);
+      res.status(500).json({ error: 'Failed to fetch commits' });
+    }
+  });
+
+  // Unlike /api/diff, this leaves currentSelection and currentCommentSelection untouched, so the
+  // exit output still reports the whole-diff comments while a single commit is being viewed.
+  app.get('/api/commit-diff', async (req, res) => {
+    if (options.stdinDiff) {
+      res.status(400).json({ error: 'Commit view is not available for stdin diff' });
+      return;
+    }
+    if (typeof req.query.hash !== 'string') {
+      res.status(400).json({ error: 'Missing commit hash' });
+      return;
+    }
+
+    const requestedHash = req.query.hash;
+    const ignoreWhitespace = req.query.ignoreWhitespace === 'true';
+    const contextLines = resolveContextLines(req.query.showFullFile === 'true');
+
+    try {
+      const commit = (await parser.getRangeCommits(currentSelection)).find(
+        ({ hash }) => hash === requestedHash,
+      );
+      if (!commit) {
+        res.status(404).json({ error: 'Commit is not in the reviewed range' });
+        return;
+      }
+
+      const selection = createDiffSelection(commit.diffBase, commit.hash);
+      const cacheKey = createDiffCacheKey(selection, ignoreWhitespace, contextLines);
+      let diffData = getCachedDiffResponse(diffDataCache, cacheKey);
+      if (!diffData) {
+        diffData = await parser.parseDiff(selection, ignoreWhitespace, contextLines);
+        setCachedDiffResponse(diffDataCache, cacheKey, diffData);
+      }
+
+      res.json({
+        ...diffData,
+        ignoreWhitespace,
+        openInEditorAvailable: false,
+        approveAvailable: false,
+        repositoryId,
+        commitScope: commit.hash,
+      } satisfies DiffResponse);
+    } catch (error) {
+      console.error('Error fetching commit diff:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to fetch commit diff',
+      });
     }
   });
 

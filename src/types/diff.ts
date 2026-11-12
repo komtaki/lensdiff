@@ -62,6 +62,17 @@ export interface DiffResponse {
   repositoryId?: string;
   commentImports?: CommentImport[];
   commentImportId?: string;
+  commitScope?: string;
+}
+
+export interface RangeCommit {
+  hash: string;
+  shortHash: string;
+  subject: string;
+}
+
+export interface RangeCommitsResponse {
+  commits: RangeCommit[];
 }
 
 export interface GeneratedStatusResponse {

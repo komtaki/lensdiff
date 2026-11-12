@@ -8,6 +8,7 @@ import {
   type DiffLine,
   type DiffResponse,
   type DiffSelection,
+  type RangeCommit,
 } from '../types/diff.js';
 import { getMergeBaseTargetRef, normalizeBaseMode } from '../utils/diffSelection.js';
 
@@ -16,6 +17,13 @@ import { isGeneratedFile } from './generated-file-check.js';
 export type DiffContextLines = number | 'full';
 
 const FULL_FILE_CONTEXT_LINES = 1_000_000_000;
+const NON_COMMIT_TARGETS = new Set(['working', 'staged', '.']);
+// A root commit has no parent, so its diff is taken against git's empty tree (SHA-1 object format).
+const EMPTY_TREE_HASH = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
+export interface RangeCommitWithDiffBase extends RangeCommit {
+  diffBase: string;
+}
 
 export class GitDiffParser {
   private git: SimpleGit;
@@ -801,6 +809,28 @@ export class GitDiffParser {
     }
 
     return null;
+  }
+
+  async getRangeCommits(selection: DiffSelection): Promise<RangeCommitWithDiffBase[]> {
+    if (!selection.baseCommitish || NON_COMMIT_TARGETS.has(selection.targetCommitish)) {
+      return [];
+    }
+
+    const baseCommitish = await this.resolveBaseCommitish(selection);
+    const output = await this.git.raw([
+      'log',
+      '--reverse',
+      '--format=%H%x00%h%x00%P%x00%s',
+      `${baseCommitish}..${selection.targetCommitish}`,
+    ]);
+
+    return output
+      .split('\n')
+      .filter((line) => line.length > 0)
+      .map((line) => {
+        const [hash = '', shortHash = '', parents = '', subject = ''] = line.split('\0');
+        return { hash, shortHash, subject, diffBase: parents.split(' ')[0] || EMPTY_TREE_HASH };
+      });
   }
 
   async getRevisionOptions(

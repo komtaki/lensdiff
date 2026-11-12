@@ -1618,4 +1618,71 @@ index abc123..def456 100644
       });
     });
   });
+
+  describe('getRangeCommits', () => {
+    it('lists merge-base range commits oldest first with their first parent as diff base', async () => {
+      const gitRaw = (parser as any).git.raw;
+      gitRaw.mockImplementation((args: string[]) =>
+        Promise.resolve(
+          args[0] === 'merge-base'
+            ? 'm'.repeat(40) + '\n'
+            : [
+                `${'a'.repeat(40)}\0aaaaaaa\0${'m'.repeat(40)}\0First change`,
+                `${'c'.repeat(40)}\0ccccccc\0${'a'.repeat(40)} ${'x'.repeat(40)}\0Merge branch`,
+                '',
+              ].join('\n'),
+        ),
+      );
+
+      const commits = await parser.getRangeCommits({
+        baseCommitish: 'origin/main',
+        targetCommitish: 'HEAD',
+        baseMode: 'merge-base',
+      });
+
+      expect(gitRaw).toHaveBeenCalledWith([
+        'log',
+        '--reverse',
+        '--format=%H%x00%h%x00%P%x00%s',
+        `${'m'.repeat(40)}..HEAD`,
+      ]);
+      expect(commits).toEqual([
+        {
+          hash: 'a'.repeat(40),
+          shortHash: 'aaaaaaa',
+          subject: 'First change',
+          diffBase: 'm'.repeat(40),
+        },
+        {
+          hash: 'c'.repeat(40),
+          shortHash: 'ccccccc',
+          subject: 'Merge branch',
+          diffBase: 'a'.repeat(40),
+        },
+      ]);
+    });
+
+    it('diffs a root commit against the empty tree', async () => {
+      (parser as any).git.raw.mockResolvedValue(`${'a'.repeat(40)}\0aaaaaaa\0\0Initial\n`);
+
+      const commits = await parser.getRangeCommits({
+        baseCommitish: 'other-root',
+        targetCommitish: 'HEAD',
+      });
+
+      expect(commits[0]?.diffBase).toBe('4b825dc642cb6eb9a060e54bf8d69288fbee4904');
+    });
+
+    it.each(['working', 'staged', '.'])('returns no commits for the %s target', async (target) => {
+      const gitRaw = (parser as any).git.raw;
+
+      const commits = await parser.getRangeCommits({
+        baseCommitish: 'HEAD',
+        targetCommitish: target,
+      });
+
+      expect(commits).toEqual([]);
+      expect(gitRaw).not.toHaveBeenCalled();
+    });
+  });
 });

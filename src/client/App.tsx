@@ -17,6 +17,8 @@ import {
   type DiffSide,
   type LineNumber,
   type CommentThread,
+  type RangeCommit,
+  type RangeCommitsResponse,
   type RevisionsResponse,
 } from '../types/diff';
 import { DEFAULT_DIFF_VIEW_MODE, normalizeDiffViewMode } from '../utils/diffMode';
@@ -32,6 +34,7 @@ import { selectThreadsForOutput } from '../utils/reviewOutput';
 import { Checkbox } from './components/Checkbox';
 import { CommentsDropdown } from './components/CommentsDropdown';
 import { CommentsListModal } from './components/CommentsListModal';
+import { CommitScopeSelector } from './components/CommitScopeSelector';
 import { DiffQuickMenu } from './components/DiffQuickMenu';
 import { DiffMinimap } from './components/DiffMinimap';
 import { DiffViewer } from './components/DiffViewer';
@@ -88,6 +91,8 @@ import { findSymbolTarget } from './utils/symbolTarget';
 import { getViewerForFile } from './viewers/registry';
 
 const EMPTY_COMMENT_THREADS: CommentThread[] = [];
+const EMPTY_DIFF_COMMENT_THREADS: DiffCommentThread[] = [];
+const EMPTY_FINDING_COUNTS = new Map<string, number>();
 const EMPTY_MERGED_CHUNKS: MergedChunk[] = [];
 const DIFF_VIEW_MODE_STORAGE_KEY = 'difit.diffViewMode';
 const SIDEBAR_WIDTH_STORAGE_KEY = 'difit.sidebarWidth';
@@ -172,6 +177,11 @@ const getInitialFileTreeOpen = () => getStoredBoolean(SIDEBAR_OPEN_STORAGE_KEY) 
 
 const getInitialShowFullFile = () => getStoredBoolean(SHOW_FULL_FILE_STORAGE_KEY) ?? true;
 
+const getResolvedSelection = (data: DiffResponse | null): DiffSelection | null =>
+  data?.baseCommitish && data.targetCommitish
+    ? createDiffSelection(data.baseCommitish, data.targetCommitish, data.requestedBaseMode)
+    : null;
+
 function App() {
   const [diffData, setDiffData] = useState<DiffResponse | null>(null);
   const [diffDataVersion, setDiffDataVersion] = useState(0);
@@ -212,17 +222,7 @@ function App() {
   selectedRevisionRef.current = selectedRevision;
   const diffRequestIdRef = useRef(0);
   const activeDiffAbortControllerRef = useRef<AbortController | null>(null);
-  const resolvedSelection = useMemo<DiffSelection | null>(() => {
-    if (!diffData?.baseCommitish || !diffData?.targetCommitish) {
-      return null;
-    }
-
-    return createDiffSelection(
-      diffData.baseCommitish,
-      diffData.targetCommitish,
-      diffData.requestedBaseMode,
-    );
-  }, [diffData]);
+  const resolvedSelection = useMemo(() => getResolvedSelection(diffData), [diffData]);
   const resolvedSelectionKey = useMemo(() => {
     if (!resolvedSelection) {
       return null;
@@ -230,6 +230,14 @@ function App() {
 
     return getDiffSelectionKey(resolvedSelection);
   }, [resolvedSelection]);
+  // Comments stay bound to the whole diff, so viewing a single commit never switches comment sessions.
+  const [reviewDiffData, setReviewDiffData] = useState<DiffResponse | null>(null);
+  const reviewSelection = useMemo(() => getResolvedSelection(reviewDiffData), [reviewDiffData]);
+  const reviewSelectionKey = reviewSelection ? getDiffSelectionKey(reviewSelection) : null;
+  const [rangeCommits, setRangeCommits] = useState<RangeCommit[]>([]);
+  const [commitScope, setCommitScope] = useState<string | null>(null);
+  const commitScopeRef = useRef<string | null>(null);
+  const isCommitView = diffData?.commitScope !== undefined;
 
   const { settings, updateSettings } = useAppearanceSettings();
   const { isMobile, isDesktop } = useViewport();
@@ -249,37 +257,37 @@ function App() {
     generateThreadPrompt,
     generateAllCommentsPrompt,
   } = useDiffComments(
-    resolvedSelection?.baseCommitish,
-    resolvedSelection?.targetCommitish,
-    diffData?.commit, // Using commit as currentCommitHash
+    reviewSelection?.baseCommitish,
+    reviewSelection?.targetCommitish,
+    reviewDiffData?.commit, // Using commit as currentCommitHash
     undefined, // branchToHash map - could be populated from server data
-    diffData?.repositoryId, // Repository identifier for storage isolation
-    resolvedSelection?.baseMode,
+    reviewDiffData?.repositoryId, // Repository identifier for storage isolation
+    reviewSelection?.baseMode,
   );
 
-  const showMobileCommentsBar = isMobile && threads.length > 0;
+  const showMobileCommentsBar = isMobile && threads.length > 0 && !isCommitView;
   const commentsContextKey = useMemo(() => {
-    if (!resolvedSelectionKey) {
+    if (!reviewSelectionKey) {
       return null;
     }
 
-    return `${diffData?.repositoryId ?? 'default'}:${resolvedSelectionKey}`;
-  }, [diffData?.repositoryId, resolvedSelectionKey]);
+    return `${reviewDiffData?.repositoryId ?? 'default'}:${reviewSelectionKey}`;
+  }, [reviewDiffData?.repositoryId, reviewSelectionKey]);
   const commentSessionQueryString = useMemo(() => {
-    if (!resolvedSelection) {
+    if (!reviewSelection) {
       return null;
     }
 
     const params = new URLSearchParams({
-      base: resolvedSelection.baseCommitish,
-      target: resolvedSelection.targetCommitish,
+      base: reviewSelection.baseCommitish,
+      target: reviewSelection.targetCommitish,
     });
-    if (resolvedSelection.baseMode === 'merge-base') {
-      params.set('baseMode', resolvedSelection.baseMode);
+    if (reviewSelection.baseMode === 'merge-base') {
+      params.set('baseMode', reviewSelection.baseMode);
     }
 
     return params.toString();
-  }, [resolvedSelection]);
+  }, [reviewSelection]);
   const getCommentApiUrl = useCallback(
     (path: string) => {
       if (!commentSessionQueryString) {
@@ -581,8 +589,11 @@ function App() {
   }, [navigableFiles]);
 
   const diffVisibleThreads = useMemo(
-    () => threads.filter((thread) => !isHiddenInDiff(thread)),
-    [threads],
+    () =>
+      isCommitView
+        ? EMPTY_DIFF_COMMENT_THREADS
+        : threads.filter((thread) => !isHiddenInDiff(thread)),
+    [isCommitView, threads],
   );
   const findingThreads = useMemo(() => threads.filter(isFindingThread), [threads]);
   const openFindingCounts = useMemo(() => countOpenFindingsByFile(threads), [threads]);
@@ -660,7 +671,7 @@ function App() {
   }, [commentsContextKey, fetchServerThreads, replaceThreads]);
 
   const { overview, reviewers, handleReviewContextChanged } = useReviewContext();
-  const hasReviewTabs = overview !== null || findingThreads.length > 0;
+  const hasReviewTabs = !isCommitView && (overview !== null || findingThreads.length > 0);
   const [selectedTab, setSelectedTab] = useState<ReviewTab | null>(null);
   const activeTab: ReviewTab = hasReviewTabs
     ? (selectedTab ?? (overview !== null ? 'overview' : 'files'))
@@ -702,7 +713,7 @@ function App() {
       onToggleReviewed: toggleFileReviewed,
       getHoveredFileIndex,
       onCreateComment: () => {
-        if (cursor) {
+        if (cursor && !isCommitView) {
           setCommentTrigger({
             fileIndex: cursor.fileIndex,
             chunkIndex: cursor.chunkIndex,
@@ -711,17 +722,19 @@ function App() {
         }
       },
       onCopyAllComments: () => {
-        if (threads.length > 0) {
+        if (threads.length > 0 && !isCommitView) {
           void handleCopyAllComments();
         }
       },
       onDeleteAllComments: () => {
-        if (threads.length > 0 && confirm('Delete all comments?')) {
+        if (threads.length > 0 && !isCommitView && confirm('Delete all comments?')) {
           clearAllComments();
         }
       },
       onShowCommentsList: () => {
-        setIsCommentsListOpen(true);
+        if (!isCommitView) {
+          setIsCommentsListOpen(true);
+        }
       },
       onRefresh: () => {
         reload();
@@ -816,22 +829,38 @@ function App() {
       const controller = new AbortController();
       activeDiffAbortControllerRef.current = controller;
       try {
-        const requestedSelection =
-          selection ??
-          (hasUserSelectedRevisionRef.current ? selectedRevisionRef.current : undefined);
         const params = new URLSearchParams({
           ignoreWhitespace: String(ignoreWhitespace),
           showFullFile: String(showFullFile),
         });
-        if (requestedSelection?.baseCommitish) params.set('base', requestedSelection.baseCommitish);
-        if (requestedSelection?.targetCommitish)
-          params.set('target', requestedSelection.targetCommitish);
-        if (requestedSelection?.baseMode === 'merge-base')
-          params.set('baseMode', requestedSelection.baseMode);
+        const scopedCommit = commitScopeRef.current;
+        let diffUrl: string;
+        if (scopedCommit) {
+          params.set('hash', scopedCommit);
+          diffUrl = `/api/commit-diff?${params}`;
+        } else {
+          const requestedSelection =
+            selection ??
+            (hasUserSelectedRevisionRef.current ? selectedRevisionRef.current : undefined);
+          if (requestedSelection?.baseCommitish)
+            params.set('base', requestedSelection.baseCommitish);
+          if (requestedSelection?.targetCommitish)
+            params.set('target', requestedSelection.targetCommitish);
+          if (requestedSelection?.baseMode === 'merge-base')
+            params.set('baseMode', requestedSelection.baseMode);
+          diffUrl = `/api/diff?${params}`;
+        }
 
-        const response = await fetch(`/api/diff?${params}`, {
+        const response = await fetch(diffUrl, {
           signal: controller.signal,
         });
+        if (!response.ok && scopedCommit && diffRequestIdRef.current === requestId) {
+          // The commit can leave the reviewed range (e.g. after a rebase), so fall back to all changes.
+          commitScopeRef.current = null;
+          setCommitScope(null);
+          void fetchDiffDataRef.current?.();
+          return;
+        }
         if (!response.ok) throw new Error('Failed to fetch diff data');
         const data = (await response.json()) as DiffResponse;
         if (diffRequestIdRef.current !== requestId) {
@@ -839,6 +868,10 @@ function App() {
         }
         setDiffData(data);
         setDiffDataVersion((prev) => prev + 1);
+        if (data.commitScope !== undefined) {
+          return;
+        }
+        setReviewDiffData(data);
 
         // Update resolved revision state from server response
         setResolvedBaseRevision(
@@ -1010,6 +1043,8 @@ function App() {
 
       hasUserSelectedRevisionRef.current = true;
       selectedRevisionRef.current = nextSelection;
+      commitScopeRef.current = null;
+      setCommitScope(null);
       setSelectedRevision(nextSelection);
       setLoading(true);
       setError(null);
@@ -1017,6 +1052,39 @@ function App() {
     },
     [fetchDiffData, selectedRevision],
   );
+
+  const handleCommitScopeChange = useCallback(
+    async (hash: string | null) => {
+      if (hash === commitScopeRef.current) return;
+
+      commitScopeRef.current = hash;
+      setCommitScope(hash);
+      setLoading(true);
+      setError(null);
+      await fetchDiffData();
+    },
+    [fetchDiffData],
+  );
+
+  useEffect(() => {
+    if (!reviewSelectionKey) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    fetch('/api/commits')
+      .then((res) => (res.ok ? (res.json() as Promise<RangeCommitsResponse>) : null))
+      .then((data) => {
+        if (!cancelled) setRangeCommits(data?.commits ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setRangeCommits([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reviewSelectionKey]);
 
   // Clear comments and viewed files on initial load if requested via CLI flag
   const hasCleanedRef = useRef(false);
@@ -1305,7 +1373,8 @@ function App() {
 
   const symbolNavigation = useSymbolNavigation();
   const { lookup: lookupSymbol } = symbolNavigation;
-  const lspStatus = symbolNavigation.status?.enabled ? symbolNavigation.status : null;
+  const lspStatus =
+    symbolNavigation.status?.enabled && !isCommitView ? symbolNavigation.status : null;
   const isSymbolPanelOpen =
     symbolNavigation.current !== null ||
     symbolNavigation.isLoading ||
@@ -1569,7 +1638,7 @@ function App() {
                   Reviewing {doneReviewerCount}/{reviewers.length}
                 </span>
               )}
-              {!isMobile && threads.length > 0 && (
+              {!isMobile && threads.length > 0 && !isCommitView && (
                 <CommentsDropdown
                   commentsCount={outputThreadCount}
                   isCopiedAll={isCopiedAll}
@@ -1608,6 +1677,18 @@ function App() {
                   />
                 </div>
               </div>
+              {isCommitView && (
+                <span className="text-xs text-github-warning">
+                  Read-only: switch to All changes to comment or approve
+                </span>
+              )}
+              {rangeCommits.length > 1 && (
+                <CommitScopeSelector
+                  commits={rangeCommits}
+                  selectedHash={commitScope}
+                  onSelect={(hash) => void handleCommitScopeChange(hash)}
+                />
+              )}
               {revisionOptions ? (
                 <DiffQuickMenu
                   options={revisionOptions}
@@ -1718,7 +1799,7 @@ function App() {
                   onScrollToFile={handleScrollToFile}
                   onFileSelected={isMobile ? handleMobileFileSelected : undefined}
                   comments={humanCommentThreads}
-                  findingCounts={openFindingCounts}
+                  findingCounts={isCommitView ? EMPTY_FINDING_COUNTS : openFindingCounts}
                   reviewedFiles={viewedFiles}
                   onToggleReviewed={toggleFileReviewed}
                   onToggleFolderReviewed={toggleFolderReviewed}
@@ -1824,7 +1905,7 @@ function App() {
                       collapsedFiles={collapsedFiles}
                       onToggleCollapsed={toggleFileCollapsed}
                       onToggleAllCollapsed={toggleAllFilesCollapsed}
-                      onAddComment={handleAddComment}
+                      onAddComment={isCommitView ? undefined : handleAddComment}
                       onGenerateThreadPrompt={handleGenerateThreadPrompt}
                       onRemoveThread={removeThread}
                       onReplyToThread={handleReplyToThread}
