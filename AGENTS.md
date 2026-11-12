@@ -7,7 +7,7 @@ The TypeScript sources live under `src`, split by runtime: `src/cli` handles com
 ## Build, Test, and Development Commands
 
 - `pnpm install` — install workspace dependencies (Node ≥21; use `mise` to stay aligned).
-- `pnpm dev` — run the local development loop (boots the CLI server and UI with hot reload).
+- `pnpm dev --overview <overview.md> --comment '[]'` — run the local development loop (boots the CLI server and UI with hot reload). The CLI refuses to start a diff review without `--overview` and at least one `--comment`.
 - `pnpm build` — generate the CLI bundle and production web assets via TypeScript project references and Vite.
 - `pnpm test` / `pnpm test:watch` — execute the Vitest suite once or in watch mode.
 - `pnpm check`, `pnpm check:fix`, and `pnpm format` — apply oxlint type-aware checks and oxfmt formatting before you commit.

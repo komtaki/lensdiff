@@ -3,7 +3,7 @@
 </h1>
 
 <p align="center">
-  English | <a href="./README.ja.md">日本語</a> | <a href="./README.zh.md">简体中文</a> | <a href="./README.ko.md">한국어</a>
+  English | <a href="./README.ja.md">日本語</a>
 </p>
 
 ## About this fork
@@ -63,7 +63,7 @@ git clone https://github.com/komtaki/lensdiff.git
 cd lensdiff
 pnpm install
 pnpm build
-node dist/cli/index.js
+node dist/cli/index.js --overview overview.md --comment "$(cat explanations.json)"
 ```
 
 The rest of this README is upstream's documentation. Read `difit` as `lensdiff` there.
@@ -198,21 +198,22 @@ Stdin mode is selected with intent-first rules:
 
 ## ⚙️ CLI Options
 
-| Flag                  | Default         | Description                                                                                             |
-| --------------------- | --------------- | ------------------------------------------------------------------------------------------------------- |
-| `<target>`            | HEAD            | Commit hash, tag, HEAD~n, branch, or special arguments                                                  |
-| `[compare-with]`      | -               | Optional second commit to compare with (shows diff between the two)                                     |
-| `--merge-base`        | false           | Resolve the base revision with `git merge-base` before diffing (Git revision mode only)                 |
-| `--pr <url>`          | -               | GitHub PR URL to review (e.g., https://github.com/owner/repo/pull/123)                                  |
-| `--comment <json>`    | -               | Inject initial comments (repeatable; accepts a JSON object or array)                                    |
-| `--port`              | 4966            | Preferred port; falls back to +1 if occupied                                                            |
-| `--host`              | 127.0.0.1       | Host address to bind server to (use 0.0.0.0 for external access)                                        |
-| `--no-open`           | false           | Don't automatically open browser                                                                        |
-| `--clean`             | false           | Clear all existing comments and viewed files on startup                                                 |
-| `--include-untracked` | false           | Automatically include untracked files in diff (only with `.` or `working`)                              |
-| `--keep-alive`        | false           | Keep server running after browser disconnects (stop manually with Ctrl+C)                               |
-| `--background`        | false           | Keep the server running in the background and output JSON connection info                               |
-| `--context <lines>`   | git default (3) | Limit surrounding context lines per change (`0` shows changes only; not available with `--pr` or stdin) |
+| Flag                  | Default         | Required            | Description                                                                                             |
+| --------------------- | --------------- | ------------------- | ------------------------------------------------------------------------------------------------------- |
+| `<target>`            | HEAD            | -                   | Commit hash, tag, HEAD~n, branch, or special arguments                                                  |
+| `[compare-with]`      | -               | -                   | Optional second commit to compare with (shows diff between the two)                                     |
+| `--merge-base`        | false           | -                   | Resolve the base revision with `git merge-base` before diffing (Git revision mode only)                 |
+| `--pr <url>`          | -               | -                   | GitHub PR URL to review (e.g., https://github.com/owner/repo/pull/123)                                  |
+| `--comment <json>`    | -               | Yes (except `--pr`) | Inject initial comments (repeatable; accepts a JSON object or array)                                    |
+| `--overview <file>`   | -               | Yes (except `--pr`) | Show a markdown file as the change overview                                                             |
+| `--port`              | 4966            | -                   | Preferred port; falls back to +1 if occupied                                                            |
+| `--host`              | 127.0.0.1       | -                   | Host address to bind server to (use 0.0.0.0 for external access)                                        |
+| `--no-open`           | false           | -                   | Don't automatically open browser                                                                        |
+| `--clean`             | false           | -                   | Clear all existing comments and viewed files on startup                                                 |
+| `--include-untracked` | false           | -                   | Automatically include untracked files in diff (only with `.` or `working`)                              |
+| `--keep-alive`        | false           | -                   | Keep server running after browser disconnects (stop manually with Ctrl+C)                               |
+| `--background`        | false           | -                   | Keep the server running in the background and output JSON connection info                               |
+| `--context <lines>`   | git default (3) | -                   | Limit surrounding context lines per change (`0` shows changes only; not available with `--pr` or stdin) |
 
 ## 💬 Comment System
 

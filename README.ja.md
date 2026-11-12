@@ -3,7 +3,7 @@
 </h1>
 
 <p align="center">
-  <a href="./README.md">English</a> | 日本語 | <a href="./README.zh.md">简体中文</a> | <a href="./README.ko.md">한국어</a>
+  <a href="./README.md">English</a> | 日本語
 </p>
 
 ## この fork について
@@ -63,7 +63,7 @@ git clone https://github.com/komtaki/lensdiff.git
 cd lensdiff
 pnpm install
 pnpm build
-node dist/cli/index.js
+node dist/cli/index.js --overview overview.md --comment "$(cat explanations.json)"
 ```
 
 以降は upstream のドキュメントです。`difit` は `lensdiff` と読み替えてください。
@@ -198,21 +198,22 @@ git diff --cached | difit -
 
 ## ⚙️ CLIオプション
 
-| フラグ                | デフォルト      | 説明                                                                                       |
-| --------------------- | --------------- | ------------------------------------------------------------------------------------------ |
-| `<target>`            | HEAD            | コミットハッシュ、タグ、HEAD~n、ブランチ、または特別な引数                                 |
-| `[compare-with]`      | -               | 比較対象の2番目のコミット（2つの間のdiffを表示）                                           |
-| `--merge-base`        | false           | diff 計算前に `git merge-base` で基準側を解決する（Git revision モード専用）               |
-| `--pr <url>`          | -               | レビューするGitHub PRのURL（例：https://github.com/owner/repo/pull/123）                   |
-| `--comment <json>`    | -               | 起動時に初期コメントを注入（複数指定可。JSON object または array を受け付ける）            |
-| `--port`              | 4966            | 優先ポート。使用中の場合は+1にフォールバック                                               |
-| `--host`              | 127.0.0.1       | サーバーをバインドするホストアドレス（外部からアクセスしたい場合は0.0.0.0を指定）          |
-| `--no-open`           | false           | ブラウザを自動的に開かない                                                                 |
-| `--clean`             | false           | 起動時に既存コメントと閲覧済みファイルをすべてクリア                                       |
-| `--include-untracked` | false           | diffにuntrackedファイルを自動的に含める（`.`または`working`のみ有効）                      |
-| `--keep-alive`        | false           | ブラウザ切断後もサーバーを終了せず起動したままにする（Ctrl+Cで手動停止）                   |
-| `--background`        | false           | サーバーをバックグラウンドで起動したままにし、接続情報をJSONで出力                         |
-| `--context <lines>`   | Gitの既定値 (3) | 変更ごとの前後コンテキスト行数を制限（`0` は変更行のみ表示。`--pr` と stdin では使用不可） |
+| フラグ                | デフォルト      | 必須                | 説明                                                                                       |
+| --------------------- | --------------- | ------------------- | ------------------------------------------------------------------------------------------ |
+| `<target>`            | HEAD            | -                   | コミットハッシュ、タグ、HEAD~n、ブランチ、または特別な引数                                 |
+| `[compare-with]`      | -               | -                   | 比較対象の2番目のコミット（2つの間のdiffを表示）                                           |
+| `--merge-base`        | false           | -                   | diff 計算前に `git merge-base` で基準側を解決する（Git revision モード専用）               |
+| `--pr <url>`          | -               | -                   | レビューするGitHub PRのURL（例：https://github.com/owner/repo/pull/123）                   |
+| `--comment <json>`    | -               | 必須（`--pr` 以外） | 起動時に初期コメントを注入（複数指定可。JSON object または array を受け付ける）            |
+| `--overview <file>`   | -               | 必須（`--pr` 以外） | markdown ファイルを変更の概要として表示                                                    |
+| `--port`              | 4966            | -                   | 優先ポート。使用中の場合は+1にフォールバック                                               |
+| `--host`              | 127.0.0.1       | -                   | サーバーをバインドするホストアドレス（外部からアクセスしたい場合は0.0.0.0を指定）          |
+| `--no-open`           | false           | -                   | ブラウザを自動的に開かない                                                                 |
+| `--clean`             | false           | -                   | 起動時に既存コメントと閲覧済みファイルをすべてクリア                                       |
+| `--include-untracked` | false           | -                   | diffにuntrackedファイルを自動的に含める（`.`または`working`のみ有効）                      |
+| `--keep-alive`        | false           | -                   | ブラウザ切断後もサーバーを終了せず起動したままにする（Ctrl+Cで手動停止）                   |
+| `--background`        | false           | -                   | サーバーをバックグラウンドで起動したままにし、接続情報をJSONで出力                         |
+| `--context <lines>`   | Gitの既定値 (3) | -                   | 変更ごとの前後コンテキスト行数を制限（`0` は変更行のみ表示。`--pr` と stdin では使用不可） |
 
 ## 💬 コメントシステム
 

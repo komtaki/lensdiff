@@ -787,17 +787,18 @@ describe('App Component - Comment sync', () => {
     });
     const previousDiffResponse: DiffResponse = {
       ...mockDiffResponse,
-      baseCommitish: 'HEAD^^',
-      targetCommitish: 'HEAD^',
-      requestedBaseCommitish: 'HEAD^^',
-      requestedTargetCommitish: 'HEAD^',
+      baseCommitish: 'HEAD',
+      targetCommitish: '.',
+      requestedBaseCommitish: 'HEAD',
+      requestedTargetCommitish: '.',
+      requestedBaseMode: 'merge-base',
     };
     const respondWith = (body: unknown) =>
       Promise.resolve({ ok: true, json: async () => body } as Response);
     let resolveCurrentPost: (response: Response) => void = () => {};
     vi.mocked(global.fetch).mockImplementation((input) => {
       const url = String(input);
-      const isPreviousComparison = url.includes('base=HEAD%5E%5E');
+      const isPreviousComparison = url.includes('baseMode=merge-base');
       if (url.startsWith('/api/revisions')) {
         return respondWith({
           specialOptions: [],
@@ -830,12 +831,14 @@ describe('App Component - Comment sync', () => {
     });
     mockComments = [previousThread];
     fireEvent.click(await screen.findByRole('button', { name: /Revision menu:/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Previous commit' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'HEAD...Uncommitted (merge-base)' }));
     await waitFor(() => {
       expect(
         vi
           .mocked(global.fetch)
-          .mock.calls.some(([url]) => String(url).startsWith('/api/comments-json?base=HEAD%5E%5E')),
+          .mock.calls.some(([url]) =>
+            String(url).startsWith('/api/comments-json?base=HEAD&target=.&baseMode=merge-base'),
+          ),
       ).toBe(true);
     });
     await flushPendingRequests();
@@ -860,7 +863,7 @@ describe('App Component - Comment sync', () => {
       expect(getCommentPostCalls()).toHaveLength(2);
     });
     const [url, request] = getCommentPostCalls()[1]!;
-    expect(url).toBe('/api/comments?base=HEAD%5E%5E&target=HEAD%5E');
+    expect(url).toBe('/api/comments?base=HEAD&target=.&baseMode=merge-base');
     expect(JSON.parse(String(request.body))).toEqual({
       baseVersion: 5,
       upserts: [editedPreviousThread],

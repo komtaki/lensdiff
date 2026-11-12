@@ -16,6 +16,7 @@ import {
   promptUser,
   parseCommentOptions,
   validateDiffArguments,
+  validateReviewMaterialOptions,
   getGitRoot,
   readStdin,
 } from './utils.js';
@@ -155,6 +156,14 @@ program
       ) {
         console.error('Error: --context must be a non-negative integer');
         process.exit(1);
+      }
+
+      if (!options.pr) {
+        const reviewMaterialValidation = validateReviewMaterialOptions(options);
+        if (!reviewMaterialValidation.valid) {
+          console.error(`Error: ${reviewMaterialValidation.error}`);
+          process.exit(1);
+        }
       }
 
       if (options.background && !isBackgroundChild) {
