@@ -159,14 +159,30 @@ function createMockThread({
   };
 }
 
-// Helper to render App with HotkeysProvider
-const renderApp = () => {
-  return render(
-    <HotkeysProvider initiallyActiveScopes={['navigation']}>
-      <App />
-    </HotkeysProvider>,
-  );
+const appTree = () => (
+  <HotkeysProvider initiallyActiveScopes={['navigation']}>
+    <App />
+  </HotkeysProvider>
+);
+
+const renderApp = () => render(appTree());
+
+const renderAppUntilCommentsBootstrapped = async () => {
+  const addEventListenerSpy = vi.spyOn(window, 'addEventListener');
+  const rendered = renderApp();
+  await waitFor(() => {
+    expect(addEventListenerSpy).toHaveBeenCalledWith('beforeunload', expect.any(Function));
+  });
+  addEventListenerSpy.mockRestore();
+  return rendered;
 };
+
+const getCommentPostCalls = () =>
+  vi
+    .mocked(global.fetch)
+    .mock.calls.filter(([url]) => String(url).startsWith('/api/comments?')) as Array<
+    [string, RequestInit]
+  >;
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -569,11 +585,7 @@ describe('App Component - Initial file collapsing', () => {
     act(() => {
       mockViewedFiles = new Set(['test.ts']);
       mockHasLoadedInitialViewedFiles = true;
-      view.rerender(
-        <HotkeysProvider initiallyActiveScopes={['navigation']}>
-          <App />
-        </HotkeysProvider>,
-      );
+      view.rerender(appTree());
     });
 
     await waitFor(() => {
@@ -607,7 +619,8 @@ describe('App Component - Comment sync', () => {
       expect(url).toBe('/api/comments?base=HEAD%5E&target=HEAD');
       expect(request.method).toBe('POST');
       expect(JSON.parse(String(request.body))).toEqual({
-        threads: [
+        deletedIds: [],
+        upserts: [
           expect.objectContaining({
             id: 'test-1',
             filePath: 'test.ts',
@@ -625,11 +638,7 @@ describe('App Component - Comment sync', () => {
     });
 
     mockComments = [];
-    rerender(
-      <HotkeysProvider initiallyActiveScopes={['navigation']}>
-        <App />
-      </HotkeysProvider>,
-    );
+    rerender(appTree());
 
     await waitFor(() => {
       const commentCalls = mockGlobalFetch.mock.calls.filter(([url]) =>
@@ -640,31 +649,83 @@ describe('App Component - Comment sync', () => {
       const [url, request] = commentCalls[1] as [string, RequestInit];
       expect(url).toBe('/api/comments?base=HEAD%5E&target=HEAD');
       expect(request.method).toBe('POST');
-      expect(JSON.parse(String(request.body))).toEqual({ threads: [] });
+      expect(JSON.parse(String(request.body))).toEqual({ upserts: [], deletedIds: ['test-1'] });
     });
   });
 
-  it('sends an empty comment list on unload when no comments remain', async () => {
+  it('does not send a beacon on unload when the server already has every thread', async () => {
+    mockComments = [
+      createMockThread({ id: 'test-1', filePath: 'test.ts', line: 10, body: 'Test comment' }),
+    ];
+    mockReviewFetch({ '/api/comments-json': { version: 1, threads: mockComments } });
+
+    await renderAppUntilCommentsBootstrapped();
+    window.dispatchEvent(new Event('beforeunload'));
+
+    expect(getCommentPostCalls()).toHaveLength(0);
+    expect(navigator.sendBeacon).not.toHaveBeenCalled();
+  });
+
+  it('sends a deletion the server has not acknowledged yet on unload', async () => {
+    mockComments = [
+      createMockThread({ id: 'test-1', filePath: 'test.ts', line: 10, body: 'Test comment' }),
+    ];
+    mockReviewFetch({ '/api/comments-json': { version: 1, threads: mockComments } }, {}, [
+      '/api/comments',
+    ]);
+
+    const { rerender } = await renderAppUntilCommentsBootstrapped();
     mockComments = [];
-    const addEventListenerSpy = vi.spyOn(window, 'addEventListener');
-
-    renderApp();
-
+    rerender(appTree());
     await waitFor(() => {
-      expect(addEventListenerSpy).toHaveBeenCalledWith('beforeunload', expect.any(Function));
+      expect(getCommentPostCalls()).toHaveLength(1);
     });
+    window.dispatchEvent(new Event('beforeunload'));
 
-    const beforeUnloadHandler = addEventListenerSpy.mock.calls.find(
-      ([eventName]) => eventName === 'beforeunload',
-    )?.[1] as (() => void) | undefined;
-    expect(beforeUnloadHandler).toBeDefined();
-    beforeUnloadHandler?.();
+    expect(navigator.sendBeacon).toHaveBeenCalledTimes(1);
+    const [url, data] = vi.mocked(navigator.sendBeacon).mock.calls[0]!;
+    expect(url).toBe('/api/comments?base=HEAD%5E&target=HEAD');
+    expect(JSON.parse(String(data))).toEqual({
+      baseVersion: 1,
+      upserts: [],
+      deletedIds: ['test-1'],
+    });
+  });
 
-    expect(navigator.sendBeacon).toHaveBeenCalledWith(
-      '/api/comments?base=HEAD%5E&target=HEAD',
-      JSON.stringify({ threads: [] }),
+  it('keeps the unload beacon small by sending only the edited thread', async () => {
+    const serverThreads = Array.from({ length: 76 }, (_, index) =>
+      createMockThread({
+        id: `explanation-${index}`,
+        filePath: 'test.ts',
+        line: index + 1,
+        body: 'x'.repeat(2000),
+      }),
     );
-    addEventListenerSpy.mockRestore();
+    mockComments = serverThreads;
+    mockReviewFetch({ '/api/comments-json': { version: 1, threads: serverThreads } }, {}, [
+      '/api/comments',
+    ]);
+
+    const { rerender } = await renderAppUntilCommentsBootstrapped();
+    const editedThread = createMockThread({
+      id: 'explanation-3',
+      filePath: 'test.ts',
+      line: 4,
+      body: 'edited',
+    });
+    mockComments = serverThreads.map((thread) =>
+      thread.id === editedThread.id ? editedThread : thread,
+    );
+    rerender(appTree());
+    await waitFor(() => {
+      expect(getCommentPostCalls()).toHaveLength(1);
+    });
+    window.dispatchEvent(new Event('beforeunload'));
+
+    expect(navigator.sendBeacon).toHaveBeenCalledTimes(1);
+    const data = String(vi.mocked(navigator.sendBeacon).mock.calls[0]![1]);
+    expect(data.length).toBeLessThan(64 * 1024);
+    expect(JSON.parse(data)).toEqual({ baseVersion: 1, upserts: [editedThread], deletedIds: [] });
   });
 
   it('shows author badges in the comments modal when the diff has multiple authors', async () => {
@@ -1210,9 +1271,13 @@ describe('App Component - Mobile sidebar auto-close', () => {
 const mockReviewFetch = (
   routes: Record<string, unknown>,
   failingRoutes: Record<string, number> = {},
+  unresolvedRoutes: string[] = [],
 ) => {
   vi.mocked(global.fetch).mockImplementation((input) => {
     const path = String(input).split('?')[0] ?? '';
+    if (unresolvedRoutes.includes(path)) {
+      return new Promise<Response>(() => {});
+    }
     const failingStatus = failingRoutes[path];
     if (failingStatus !== undefined) {
       return Promise.resolve({
@@ -1418,7 +1483,15 @@ describe('App Component - Approve', () => {
     vi.mocked(window.close).mockRestore();
   });
 
-  it('posts the threads and shows the approved state', async () => {
+  it('posts the thread changes the server has not acknowledged and shows the approved state', async () => {
+    mockReviewFetch(
+      {
+        '/api/overview': { markdown: null },
+        '/api/reviewers': { reviewers: [] },
+        '/api/approve': { success: true },
+      },
+      { '/api/comments': 500 },
+    );
     renderApp();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
@@ -1430,9 +1503,31 @@ describe('App Component - Approve', () => {
     expect(url).toBe('/api/approve?base=HEAD%5E&target=HEAD');
     expect(request.method).toBe('POST');
     expect(JSON.parse(String(request.body))).toEqual({
-      threads: [expect.objectContaining({ id: 'test-1' })],
+      upserts: [expect.objectContaining({ id: 'test-1' })],
+      deletedIds: [],
     });
     expect(unloadOnClose).toEqual([{ prompted: false, beaconSent: false }]);
+  });
+
+  it('posts an empty change set when the server already has every thread', async () => {
+    mockReviewFetch({
+      '/api/overview': { markdown: null },
+      '/api/reviewers': { reviewers: [] },
+      '/api/comments-json': { version: 1, threads: mockComments },
+      '/api/approve': { success: true },
+    });
+    await renderAppUntilCommentsBootstrapped();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    expect(await screen.findByText('You can close this tab.')).toBeInTheDocument();
+    const approveCalls = getApproveCalls();
+    expect(approveCalls).toHaveLength(1);
+    expect(JSON.parse(String(approveCalls[0]![1].body))).toEqual({
+      baseVersion: 1,
+      upserts: [],
+      deletedIds: [],
+    });
   });
 
   it('asks for confirmation while AI reviewers are running', async () => {

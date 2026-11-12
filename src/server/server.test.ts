@@ -224,23 +224,22 @@ describe('Server Integration Tests', () => {
       messages: [{ id, body, createdAt: isoNow, updatedAt: isoNow }],
     });
 
-    const postThreads = (
+    const postComments = (
       port: number,
-      threads: unknown[],
-      baseVersion?: number,
+      body: Record<string, unknown>,
       contentType = 'application/json',
     ) =>
       fetch(`http://localhost:${port}/api/comments`, {
         method: 'POST',
         headers: { 'Content-Type': contentType },
-        body: JSON.stringify({ threads, baseVersion }),
+        body: JSON.stringify(body),
       });
 
     const getSession = async (port: number) => {
       const res = await fetch(`http://localhost:${port}/api/comments-json`);
       return (await res.json()) as {
         version: number;
-        threads: Array<{ id: string; filePath: string }>;
+        threads: Array<{ id: string; filePath: string; messages: Array<{ body: string }> }>;
       };
     };
 
@@ -262,7 +261,7 @@ describe('Server Integration Tests', () => {
           const threads = makeLargeThreads();
           expect(JSON.stringify({ threads }).length).toBeGreaterThan(102400);
 
-          const response = await postThreads(result.port, threads, undefined, contentType);
+          const response = await postComments(result.port, { threads }, contentType);
 
           expect(response.status).toBe(200);
           expect((await getSession(result.port)).threads).toHaveLength(threads.length);
@@ -285,7 +284,9 @@ describe('Server Integration Tests', () => {
 
       try {
         // Browser establishes a thread; it now knows version 1.
-        await postThreads(result.port, [makeThread('t1', 'src/a.ts', 10, 'human thread')]);
+        await postComments(result.port, {
+          threads: [makeThread('t1', 'src/a.ts', 10, 'human thread')],
+        });
         const afterFirst = await getSession(result.port);
         expect(afterFirst.version).toBe(1);
 
@@ -308,11 +309,10 @@ describe('Server Integration Tests', () => {
 
         // The browser, unaware of the agent's thread, pushes its stale set
         // tagged with the version it last observed (1).
-        const staleResponse = await postThreads(
-          result.port,
-          [makeThread('t1', 'src/a.ts', 10, 'human thread')],
-          1,
-        );
+        const staleResponse = await postComments(result.port, {
+          threads: [makeThread('t1', 'src/a.ts', 10, 'human thread')],
+          baseVersion: 1,
+        });
         const staleResult = (await staleResponse.json()) as { merged: boolean };
         expect(staleResult.merged).toBe(true);
 
@@ -338,19 +338,143 @@ describe('Server Integration Tests', () => {
       });
 
       try {
-        await postThreads(result.port, [makeThread('t1', 'src/a.ts', 10, 'human thread')]);
+        await postComments(result.port, {
+          threads: [makeThread('t1', 'src/a.ts', 10, 'human thread')],
+        });
         const afterFirst = await getSession(result.port);
         expect(afterFirst.version).toBe(1);
         expect(afterFirst.threads).toHaveLength(1);
 
         // Same version means no concurrent writer, so an empty set is a real
         // deletion and must be honored (not merged back).
-        const response = await postThreads(result.port, [], afterFirst.version);
+        const response = await postComments(result.port, {
+          threads: [],
+          baseVersion: afterFirst.version,
+        });
         const body = (await response.json()) as { merged: boolean };
         expect(body.merged).toBe(false);
 
         const final = await getSession(result.port);
         expect(final.threads).toHaveLength(0);
+      } finally {
+        if (result.server) {
+          await new Promise<void>((resolve) => {
+            result.server!.close(() => resolve());
+          });
+        }
+      }
+    });
+
+    it('applies upserts and deletions from a change set and keeps unmentioned threads', async () => {
+      const port = await getAvailablePort(4966);
+      const result = await startServer({
+        preferredPort: port,
+        openBrowser: false,
+      });
+
+      try {
+        await postComments(result.port, {
+          threads: [
+            makeThread('t1', 'src/a.ts', 10, 'first'),
+            makeThread('t2', 'src/b.ts', 20, 'second'),
+            makeThread('t3', 'src/c.ts', 30, 'third'),
+          ],
+        });
+        const before = await getSession(result.port);
+
+        const response = await postComments(result.port, {
+          upserts: [
+            makeThread('t2', 'src/b.ts', 20, 'edited'),
+            makeThread('t4', 'src/d.ts', 40, 'fourth'),
+          ],
+          deletedIds: ['t1'],
+          baseVersion: before.version,
+        });
+        const body = (await response.json()) as Record<string, unknown>;
+        expect(body).toMatchObject({ success: true, merged: false });
+        expect(body).not.toHaveProperty('threads');
+
+        const final = await getSession(result.port);
+        expect(final.threads.map((thread) => thread.id)).toEqual(['t2', 't3', 't4']);
+        expect(final.threads[0]?.messages[0]?.body).toBe('edited');
+      } finally {
+        if (result.server) {
+          await new Promise<void>((resolve) => {
+            result.server!.close(() => resolve());
+          });
+        }
+      }
+    });
+
+    it('merges a stale change set, keeps agent threads and still honors its deletions', async () => {
+      const port = await getAvailablePort(4966);
+      const result = await startServer({
+        preferredPort: port,
+        openBrowser: false,
+      });
+
+      try {
+        await postComments(result.port, {
+          threads: [
+            makeThread('t1', 'src/a.ts', 10, 'first'),
+            makeThread('t2', 'src/b.ts', 20, 'second'),
+          ],
+        });
+        const before = await getSession(result.port);
+
+        const agentImport: CommentImport[] = [
+          {
+            type: 'thread',
+            id: 'agent-1',
+            filePath: 'src/agent.ts',
+            position: { side: 'new', line: 5 },
+            body: 'agent finding',
+            author: 'Agent',
+          },
+        ];
+        await fetch(`http://localhost:${result.port}/api/comment-imports`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(agentImport),
+        });
+
+        const response = await postComments(result.port, {
+          upserts: [makeThread('t3', 'src/c.ts', 30, 'third')],
+          deletedIds: ['t1'],
+          baseVersion: before.version,
+        });
+        const body = (await response.json()) as {
+          merged: boolean;
+          threads?: Array<{ id: string }>;
+        };
+        expect(body.merged).toBe(true);
+        expect(body.threads?.map((thread) => thread.id).sort()).toEqual(['agent-1', 't2', 't3']);
+
+        const final = await getSession(result.port);
+        expect(final.threads.map((thread) => thread.id).sort()).toEqual(['agent-1', 't2', 't3']);
+      } finally {
+        if (result.server) {
+          await new Promise<void>((resolve) => {
+            result.server!.close(() => resolve());
+          });
+        }
+      }
+    });
+
+    it('omits threads from the response of a non-stale full replacement', async () => {
+      const port = await getAvailablePort(4966);
+      const result = await startServer({
+        preferredPort: port,
+        openBrowser: false,
+      });
+
+      try {
+        const response = await postComments(result.port, {
+          threads: [makeThread('t1', 'src/a.ts', 10, 'first')],
+        });
+        const body = (await response.json()) as Record<string, unknown>;
+        expect(body).toMatchObject({ success: true, merged: false });
+        expect(body).not.toHaveProperty('threads');
       } finally {
         if (result.server) {
           await new Promise<void>((resolve) => {
@@ -368,7 +492,9 @@ describe('Server Integration Tests', () => {
       });
 
       try {
-        await postThreads(result.port, [makeThread('t1', 'src/a.ts', 10, 'human thread')]);
+        await postComments(result.port, {
+          threads: [makeThread('t1', 'src/a.ts', 10, 'human thread')],
+        });
         const before = await getSession(result.port);
 
         // A reply via comment-imports must register as a change — otherwise the
