@@ -24,6 +24,10 @@ Vitest with the `happy-dom` environment drives unit and integration coverage, an
 
 Git history mixes lightweight descriptions with Conventional Commit prefixes—follow the pattern where it clarifies intent: `fix: guard empty diff (#123)` or `feat(cli): add --port flag`. Keep commits focused, include context in the body, and reference issues with `#id` when relevant. Before opening a PR, ensure `pnpm check`, `pnpm test`, and `pnpm build` succeed locally; lefthook re-runs them on commit and push. PRs should outline motivation, implementation notes, manual verification steps, and UI changes (attach refreshed `docs/images` assets or screenshots for web updates).
 
+## Reviewing Changes to lensdiff
+
+Review a lensdiff change before opening its PR with the build from that branch, not the globally installed release, which lacks the change and keeps the reviewer from trying it while reading the overview and explanations. Run `pnpm build`, then from the repository root `node dist/cli/index.js --merge-base HEAD origin/main --overview <overview.md> --comment "$(cat <explanations.json>)"`. Pass `--overview` and `--comment` here too; do not start a bare instance just to demo the feature. After each fix commit, rebuild and relaunch so the running build matches `HEAD`.
+
 ## Tooling & Environment
 
 Use `pnpm` for dependency management (avoid mixing with `npm` or `yarn`) and rely on the `mise.toml` pinned versions for local reproducibility. When performance is a concern, run `pnpm perf:*` scripts to benchmark diff rendering before merging significant parser or rendering changes.
