@@ -185,8 +185,8 @@ function App() {
   const isCommitView = commitDiffData !== null;
   const displayedDiffData = commitDiffData ?? diffData;
   const selectedCommitHash = commitDiffData?.commitScope ?? null;
-  const selectedCommitHashRef = useRef(selectedCommitHash);
-  selectedCommitHashRef.current = selectedCommitHash;
+  // The latest requested commit, which can be ahead of commitDiffData while its fetch is in flight.
+  const requestedCommitHashRef = useRef<string | null>(null);
   const [diffDataVersion, setDiffDataVersion] = useState(0);
   const [diffMode, setDiffMode] = useState<DiffViewMode>(getInitialDiffViewMode);
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(true);
@@ -668,7 +668,7 @@ function App() {
   const fetchDiffDataRef = useRef<((selection?: DiffSelection) => Promise<void>) | null>(null);
   const fetchCommitDiffRef = useRef<((hash: string) => Promise<void>) | null>(null);
   const handleWatchReload = useCallback(async () => {
-    const commitHash = selectedCommitHashRef.current;
+    const commitHash = requestedCommitHashRef.current;
     await Promise.all([
       fetchDiffDataRef.current?.(),
       commitHash ? fetchCommitDiffRef.current?.(commitHash) : undefined,
@@ -905,6 +905,7 @@ function App() {
 
   const fetchCommitDiff = useCallback(
     async (hash: string) => {
+      requestedCommitHashRef.current = hash;
       const requestId = commitDiffRequestIdRef.current + 1;
       commitDiffRequestIdRef.current = requestId;
       activeCommitDiffAbortControllerRef.current?.abort();
@@ -934,6 +935,9 @@ function App() {
         return;
       }
       // A failed fetch (e.g. the commit left the range after a rebase) falls back to the whole diff.
+      if (!nextCommitDiffData) {
+        requestedCommitHashRef.current = null;
+      }
       setCommitDiffData(nextCommitDiffData);
       setDiffDataVersion((prev) => prev + 1);
     },
@@ -941,19 +945,24 @@ function App() {
   );
   fetchCommitDiffRef.current = fetchCommitDiff;
 
-  const showWholeDiff = useCallback(() => {
+  const cancelCommitDiffRequest = useCallback(() => {
+    requestedCommitHashRef.current = null;
     commitDiffRequestIdRef.current += 1;
     activeCommitDiffAbortControllerRef.current?.abort();
+  }, []);
+
+  const showWholeDiff = useCallback(() => {
+    cancelCommitDiffRequest();
     setCommitDiffData(null);
     setDiffDataVersion((prev) => prev + 1);
-  }, []);
+  }, [cancelCommitDiffRequest]);
 
   useEffect(() => {
     void fetchDiffData();
   }, [fetchDiffData]);
 
   useEffect(() => {
-    const commitHash = selectedCommitHashRef.current;
+    const commitHash = requestedCommitHashRef.current;
     if (commitHash) {
       void fetchCommitDiff(commitHash);
     }
@@ -1116,11 +1125,22 @@ function App() {
   const rangeCommits = useRangeCommits(resolvedSelectionKey);
   const canSwitchCommits = rangeCommits.length > 1;
 
+  // Without the list there is no way back from a commit, so leave it when the range no longer offers it.
+  useEffect(() => {
+    const commitHash = requestedCommitHashRef.current;
+    if (
+      commitHash &&
+      (!canSwitchCommits || !rangeCommits.some((commit) => commit.hash === commitHash))
+    ) {
+      showWholeDiff();
+    }
+  }, [canSwitchCommits, rangeCommits, showWholeDiff]);
+
   const selectAdjacentCommit = useCallback(
     (step: 1 | -1) => {
       if (!canSwitchCommits) return;
       const scopeHashes = [null, ...rangeCommits.map((commit) => commit.hash)];
-      const nextHash = scopeHashes[scopeHashes.indexOf(selectedCommitHashRef.current) + step];
+      const nextHash = scopeHashes[scopeHashes.indexOf(requestedCommitHashRef.current) + step];
       if (nextHash !== undefined) {
         handleCommitScopeChange(nextHash);
       }
@@ -1398,6 +1418,7 @@ function App() {
   const showLineInDiff = useCallback(
     (filePath: string, line: number, side: DiffSide = 'new') => {
       // Findings and overview references point at the whole diff, which a single commit may not contain.
+      cancelCommitDiffRequest();
       if (isCommitView) {
         showWholeDiff();
         setPendingLineInDiff({ filePath, line, side });
@@ -1422,6 +1443,7 @@ function App() {
       });
     },
     [
+      cancelCommitDiffRequest,
       displayedDiffData,
       isCommitView,
       scrollFileIntoDiffContainer,
