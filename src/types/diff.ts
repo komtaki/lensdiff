@@ -65,14 +65,8 @@ export interface DiffResponse {
   commitScope?: string;
 }
 
-export interface RangeCommit {
-  hash: string;
-  shortHash: string;
-  subject: string;
-}
-
 export interface RangeCommitsResponse {
-  commits: RangeCommit[];
+  commits: CommitInfo[];
 }
 
 export interface GeneratedStatusResponse {

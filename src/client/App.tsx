@@ -17,8 +17,6 @@ import {
   type DiffSide,
   type LineNumber,
   type CommentThread,
-  type RangeCommit,
-  type RangeCommitsResponse,
   type RevisionsResponse,
 } from '../types/diff';
 import { DEFAULT_DIFF_VIEW_MODE, normalizeDiffViewMode } from '../utils/diffMode';
@@ -58,6 +56,7 @@ import { useExpandedLines, type MergedChunk } from './hooks/useExpandedLines';
 import { useFileWatch } from './hooks/useFileWatch';
 import { useKeyboardNavigation } from './hooks/useKeyboardNavigation';
 import { useLazyDiffRendering } from './hooks/useLazyDiffRendering';
+import { useRangeCommits } from './hooks/useRangeCommits';
 import { useReviewContext } from './hooks/useReviewContext';
 import { useSymbolNavigation } from './hooks/useSymbolNavigation';
 import { useViewedFiles } from './hooks/useViewedFiles';
@@ -92,7 +91,6 @@ import { getViewerForFile } from './viewers/registry';
 
 const EMPTY_COMMENT_THREADS: CommentThread[] = [];
 const EMPTY_DIFF_COMMENT_THREADS: DiffCommentThread[] = [];
-const EMPTY_FINDING_COUNTS = new Map<string, number>();
 const EMPTY_MERGED_CHUNKS: MergedChunk[] = [];
 const DIFF_VIEW_MODE_STORAGE_KEY = 'difit.diffViewMode';
 const SIDEBAR_WIDTH_STORAGE_KEY = 'difit.sidebarWidth';
@@ -177,13 +175,16 @@ const getInitialFileTreeOpen = () => getStoredBoolean(SIDEBAR_OPEN_STORAGE_KEY) 
 
 const getInitialShowFullFile = () => getStoredBoolean(SHOW_FULL_FILE_STORAGE_KEY) ?? true;
 
-const getResolvedSelection = (data: DiffResponse | null): DiffSelection | null =>
-  data?.baseCommitish && data.targetCommitish
-    ? createDiffSelection(data.baseCommitish, data.targetCommitish, data.requestedBaseMode)
-    : null;
+const isAbortError = (error: unknown) => (error as { name?: string } | null)?.name === 'AbortError';
 
 function App() {
   const [diffData, setDiffData] = useState<DiffResponse | null>(null);
+  const [commitDiffData, setCommitDiffData] = useState<DiffResponse | null>(null);
+  const isCommitView = commitDiffData !== null;
+  const displayedDiffData = commitDiffData ?? diffData;
+  const selectedCommitHash = commitDiffData?.commitScope ?? null;
+  const selectedCommitHashRef = useRef(selectedCommitHash);
+  selectedCommitHashRef.current = selectedCommitHash;
   const [diffDataVersion, setDiffDataVersion] = useState(0);
   const [diffMode, setDiffMode] = useState<DiffViewMode>(getInitialDiffViewMode);
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(true);
@@ -222,7 +223,19 @@ function App() {
   selectedRevisionRef.current = selectedRevision;
   const diffRequestIdRef = useRef(0);
   const activeDiffAbortControllerRef = useRef<AbortController | null>(null);
-  const resolvedSelection = useMemo(() => getResolvedSelection(diffData), [diffData]);
+  const commitDiffRequestIdRef = useRef(0);
+  const activeCommitDiffAbortControllerRef = useRef<AbortController | null>(null);
+  const resolvedSelection = useMemo<DiffSelection | null>(() => {
+    if (!diffData?.baseCommitish || !diffData?.targetCommitish) {
+      return null;
+    }
+
+    return createDiffSelection(
+      diffData.baseCommitish,
+      diffData.targetCommitish,
+      diffData.requestedBaseMode,
+    );
+  }, [diffData]);
   const resolvedSelectionKey = useMemo(() => {
     if (!resolvedSelection) {
       return null;
@@ -230,14 +243,6 @@ function App() {
 
     return getDiffSelectionKey(resolvedSelection);
   }, [resolvedSelection]);
-  // Comments stay bound to the whole diff, so viewing a single commit never switches comment sessions.
-  const [reviewDiffData, setReviewDiffData] = useState<DiffResponse | null>(null);
-  const reviewSelection = useMemo(() => getResolvedSelection(reviewDiffData), [reviewDiffData]);
-  const reviewSelectionKey = reviewSelection ? getDiffSelectionKey(reviewSelection) : null;
-  const [rangeCommits, setRangeCommits] = useState<RangeCommit[]>([]);
-  const [commitScope, setCommitScope] = useState<string | null>(null);
-  const commitScopeRef = useRef<string | null>(null);
-  const isCommitView = diffData?.commitScope !== undefined;
 
   const { settings, updateSettings } = useAppearanceSettings();
   const { isMobile, isDesktop } = useViewport();
@@ -257,37 +262,39 @@ function App() {
     generateThreadPrompt,
     generateAllCommentsPrompt,
   } = useDiffComments(
-    reviewSelection?.baseCommitish,
-    reviewSelection?.targetCommitish,
-    reviewDiffData?.commit, // Using commit as currentCommitHash
+    resolvedSelection?.baseCommitish,
+    resolvedSelection?.targetCommitish,
+    diffData?.commit, // Using commit as currentCommitHash
     undefined, // branchToHash map - could be populated from server data
-    reviewDiffData?.repositoryId, // Repository identifier for storage isolation
-    reviewSelection?.baseMode,
+    diffData?.repositoryId, // Repository identifier for storage isolation
+    resolvedSelection?.baseMode,
   );
 
-  const showMobileCommentsBar = isMobile && threads.length > 0 && !isCommitView;
+  // The whole-diff threads keep syncing and feed the exit output; a single commit only hides them.
+  const reviewThreads = isCommitView ? EMPTY_DIFF_COMMENT_THREADS : threads;
+  const showMobileCommentsBar = isMobile && reviewThreads.length > 0;
   const commentsContextKey = useMemo(() => {
-    if (!reviewSelectionKey) {
+    if (!resolvedSelectionKey) {
       return null;
     }
 
-    return `${reviewDiffData?.repositoryId ?? 'default'}:${reviewSelectionKey}`;
-  }, [reviewDiffData?.repositoryId, reviewSelectionKey]);
+    return `${diffData?.repositoryId ?? 'default'}:${resolvedSelectionKey}`;
+  }, [diffData?.repositoryId, resolvedSelectionKey]);
   const commentSessionQueryString = useMemo(() => {
-    if (!reviewSelection) {
+    if (!resolvedSelection) {
       return null;
     }
 
     const params = new URLSearchParams({
-      base: reviewSelection.baseCommitish,
-      target: reviewSelection.targetCommitish,
+      base: resolvedSelection.baseCommitish,
+      target: resolvedSelection.targetCommitish,
     });
-    if (reviewSelection.baseMode === 'merge-base') {
-      params.set('baseMode', reviewSelection.baseMode);
+    if (resolvedSelection.baseMode === 'merge-base') {
+      params.set('baseMode', resolvedSelection.baseMode);
     }
 
     return params.toString();
-  }, [reviewSelection]);
+  }, [resolvedSelection]);
   const getCommentApiUrl = useCallback(
     (path: string) => {
       if (!commentSessionQueryString) {
@@ -404,14 +411,14 @@ function App() {
     scrollFileIntoDiffContainer,
     isFileScrolledPastContainerTop,
   } = useLazyDiffRendering({
-    diffData,
+    diffData: displayedDiffData,
     diffScrollContainerRef,
-    setDiffData,
+    setDiffData: isCommitView ? setCommitDiffData : setDiffData,
   });
 
   const toggleFileReviewed = useCallback(
     async (filePath: string) => {
-      if (!diffData) return;
+      if (!diffData || isCommitView) return;
 
       const file = diffData.files.find((f) => f.path === filePath);
       if (!file) return;
@@ -445,6 +452,7 @@ function App() {
     },
     [
       diffData,
+      isCommitView,
       isFileScrolledPastContainerTop,
       scrollFileIntoDiffContainer,
       toggleFileViewed,
@@ -454,7 +462,7 @@ function App() {
 
   const toggleFolderReviewed = useCallback(
     async (folderPath: string, reviewed: boolean) => {
-      if (!diffData) return;
+      if (!diffData || isCommitView) return;
 
       const folderFiles = diffData.files.filter((file) => file.path.startsWith(`${folderPath}/`));
       if (folderFiles.length === 0) return;
@@ -474,7 +482,7 @@ function App() {
         return newSet;
       });
     },
-    [diffData, setFilesViewed],
+    [diffData, isCommitView, setFilesViewed],
   );
 
   const toggleFileCollapsed = useCallback((filePath: string) => {
@@ -491,17 +499,17 @@ function App() {
 
   const toggleAllFilesCollapsed = useCallback(
     (shouldCollapse: boolean) => {
-      if (!diffData) return;
+      if (!displayedDiffData) return;
 
       if (shouldCollapse) {
         // Collapse all files
-        setCollapsedFiles(new Set(diffData.files.map((f) => f.path)));
+        setCollapsedFiles(new Set(displayedDiffData.files.map((f) => f.path)));
       } else {
         // Expand all files
         setCollapsedFiles(new Set());
       }
     },
-    [diffData],
+    [displayedDiffData],
   );
 
   const handleMobileFileSelected = useCallback(() => {
@@ -537,8 +545,8 @@ function App() {
     getMergedChunks,
     lastUpdatedAt,
   } = useExpandedLines({
-    baseCommitish: diffData?.baseCommitish,
-    targetCommitish: diffData?.targetCommitish,
+    baseCommitish: displayedDiffData?.baseCommitish,
+    targetCommitish: displayedDiffData?.targetCommitish,
     diffIdentity: diffDataVersion,
   });
 
@@ -550,15 +558,15 @@ function App() {
   const [mergedChunksState, setMergedChunksState] = useState(EMPTY_MERGED_CHUNKS_STATE);
   const filesByPath = useMemo(() => {
     const map = new Map<string, DiffResponse['files'][number]>();
-    diffData?.files.forEach((file) => {
+    displayedDiffData?.files.forEach((file) => {
       map.set(file.path, file);
     });
     return map;
-  }, [diffData]);
+  }, [displayedDiffData]);
 
   // Recompute merged chunks for the current fetched diff only.
   useEffect(() => {
-    if (!diffData) {
+    if (!displayedDiffData) {
       setMergedChunksState(EMPTY_MERGED_CHUNKS_STATE);
       return;
     }
@@ -568,17 +576,17 @@ function App() {
         getMergedChunksRef.current(file),
       ),
     );
-  }, [diffData, diffDataVersion, filesByPath, renderedFilePaths, lastUpdatedAt]);
+  }, [displayedDiffData, diffDataVersion, filesByPath, renderedFilePaths, lastUpdatedAt]);
 
   // Create files with merged chunks for keyboard navigation
   const navigableFiles = useMemo(() => {
-    if (!diffData) return [];
-    return diffData.files.map((file) => ({
+    if (!displayedDiffData) return [];
+    return displayedDiffData.files.map((file) => ({
       ...file,
       chunks:
         getMergedChunksForVersion(mergedChunksState, diffDataVersion, file.path) || file.chunks,
     }));
-  }, [diffData, diffDataVersion, mergedChunksState]);
+  }, [displayedDiffData, diffDataVersion, mergedChunksState]);
 
   const fileLineIndexByPath = useMemo(() => {
     const map = new Map<string, ReturnType<typeof buildFileLineIndex>>();
@@ -589,20 +597,23 @@ function App() {
   }, [navigableFiles]);
 
   const diffVisibleThreads = useMemo(
-    () =>
-      isCommitView
-        ? EMPTY_DIFF_COMMENT_THREADS
-        : threads.filter((thread) => !isHiddenInDiff(thread)),
-    [isCommitView, threads],
+    () => reviewThreads.filter((thread) => !isHiddenInDiff(thread)),
+    [reviewThreads],
   );
-  const findingThreads = useMemo(() => threads.filter(isFindingThread), [threads]);
-  const openFindingCounts = useMemo(() => countOpenFindingsByFile(threads), [threads]);
+  const findingThreads = useMemo(() => reviewThreads.filter(isFindingThread), [reviewThreads]);
+  const openFindingCounts = useMemo(() => countOpenFindingsByFile(reviewThreads), [reviewThreads]);
   const openFindingCount = useMemo(
     () => Array.from(openFindingCounts.values()).reduce((sum, count) => sum + count, 0),
     [openFindingCounts],
   );
-  const findingCountByReviewer = useMemo(() => countFindingsByReviewer(threads), [threads]);
-  const outputThreadCount = useMemo(() => selectThreadsForOutput(threads).length, [threads]);
+  const findingCountByReviewer = useMemo(
+    () => countFindingsByReviewer(reviewThreads),
+    [reviewThreads],
+  );
+  const outputThreadCount = useMemo(
+    () => selectThreadsForOutput(reviewThreads).length,
+    [reviewThreads],
+  );
 
   const normalizedThreads = useMemo<CommentThread[]>(
     () =>
@@ -654,8 +665,13 @@ function App() {
     lineIndex: number;
   } | null>(null);
   const fetchDiffDataRef = useRef<((selection?: DiffSelection) => Promise<void>) | null>(null);
+  const fetchCommitDiffRef = useRef<((hash: string) => Promise<void>) | null>(null);
   const handleWatchReload = useCallback(async () => {
-    await fetchDiffDataRef.current?.();
+    const commitHash = selectedCommitHashRef.current;
+    await Promise.all([
+      fetchDiffDataRef.current?.(),
+      commitHash ? fetchCommitDiffRef.current?.(commitHash) : undefined,
+    ]);
   }, []);
   const handleCommentsChanged = useCallback(async () => {
     try {
@@ -713,7 +729,7 @@ function App() {
       onToggleReviewed: toggleFileReviewed,
       getHoveredFileIndex,
       onCreateComment: () => {
-        if (cursor && !isCommitView) {
+        if (cursor && addCommentHandler) {
           setCommentTrigger({
             fileIndex: cursor.fileIndex,
             chunkIndex: cursor.chunkIndex,
@@ -722,19 +738,17 @@ function App() {
         }
       },
       onCopyAllComments: () => {
-        if (threads.length > 0 && !isCommitView) {
+        if (reviewThreads.length > 0) {
           void handleCopyAllComments();
         }
       },
       onDeleteAllComments: () => {
-        if (threads.length > 0 && !isCommitView && confirm('Delete all comments?')) {
+        if (reviewThreads.length > 0 && confirm('Delete all comments?')) {
           clearAllComments();
         }
       },
       onShowCommentsList: () => {
-        if (!isCommitView) {
-          setIsCommentsListOpen(true);
-        }
+        setIsCommentsListOpen(true);
       },
       onRefresh: () => {
         reload();
@@ -747,27 +761,27 @@ function App() {
   const handleViewedButtonToggle = useCallback(
     (filePath: string) => {
       void toggleFileReviewed(filePath);
-      if (diffData) {
-        const fileIndex = diffData.files.findIndex((f) => f.path === filePath);
+      if (displayedDiffData) {
+        const fileIndex = displayedDiffData.files.findIndex((f) => f.path === filePath);
         if (fileIndex !== -1) {
           rememberFilePosition(fileIndex);
         }
       }
     },
-    [toggleFileReviewed, diffData, rememberFilePosition],
+    [toggleFileReviewed, displayedDiffData, rememberFilePosition],
   );
 
   useEffect(() => {
-    if (!diffData || !cursor) return;
+    if (!displayedDiffData || !cursor) return;
 
-    const filePath = diffData.files[cursor.fileIndex]?.path;
+    const filePath = displayedDiffData.files[cursor.fileIndex]?.path;
     if (!filePath || renderedFilePaths.has(filePath)) return;
 
     ensureFilesRenderedUpTo(filePath);
     requestAnimationFrame(() => {
       setCursorPosition(cursor);
     });
-  }, [cursor, diffData, ensureFilesRenderedUpTo, renderedFilePaths, setCursorPosition]);
+  }, [cursor, displayedDiffData, ensureFilesRenderedUpTo, renderedFilePaths, setCursorPosition]);
 
   const handleLineClick = useCallback(
     (fileIndex: number, chunkIndex: number, lineIndex: number, side: 'left' | 'right') => {
@@ -829,38 +843,22 @@ function App() {
       const controller = new AbortController();
       activeDiffAbortControllerRef.current = controller;
       try {
+        const requestedSelection =
+          selection ??
+          (hasUserSelectedRevisionRef.current ? selectedRevisionRef.current : undefined);
         const params = new URLSearchParams({
           ignoreWhitespace: String(ignoreWhitespace),
           showFullFile: String(showFullFile),
         });
-        const scopedCommit = commitScopeRef.current;
-        let diffUrl: string;
-        if (scopedCommit) {
-          params.set('hash', scopedCommit);
-          diffUrl = `/api/commit-diff?${params}`;
-        } else {
-          const requestedSelection =
-            selection ??
-            (hasUserSelectedRevisionRef.current ? selectedRevisionRef.current : undefined);
-          if (requestedSelection?.baseCommitish)
-            params.set('base', requestedSelection.baseCommitish);
-          if (requestedSelection?.targetCommitish)
-            params.set('target', requestedSelection.targetCommitish);
-          if (requestedSelection?.baseMode === 'merge-base')
-            params.set('baseMode', requestedSelection.baseMode);
-          diffUrl = `/api/diff?${params}`;
-        }
+        if (requestedSelection?.baseCommitish) params.set('base', requestedSelection.baseCommitish);
+        if (requestedSelection?.targetCommitish)
+          params.set('target', requestedSelection.targetCommitish);
+        if (requestedSelection?.baseMode === 'merge-base')
+          params.set('baseMode', requestedSelection.baseMode);
 
-        const response = await fetch(diffUrl, {
+        const response = await fetch(`/api/diff?${params}`, {
           signal: controller.signal,
         });
-        if (!response.ok && scopedCommit && diffRequestIdRef.current === requestId) {
-          // The commit can leave the reviewed range (e.g. after a rebase), so fall back to all changes.
-          commitScopeRef.current = null;
-          setCommitScope(null);
-          void fetchDiffDataRef.current?.();
-          return;
-        }
         if (!response.ok) throw new Error('Failed to fetch diff data');
         const data = (await response.json()) as DiffResponse;
         if (diffRequestIdRef.current !== requestId) {
@@ -868,10 +866,6 @@ function App() {
         }
         setDiffData(data);
         setDiffDataVersion((prev) => prev + 1);
-        if (data.commitScope !== undefined) {
-          return;
-        }
-        setReviewDiffData(data);
 
         // Update resolved revision state from server response
         setResolvedBaseRevision(
@@ -891,10 +885,7 @@ function App() {
 
         // Lock files are now automatically marked as viewed by useViewedFiles hook
       } catch (err) {
-        if ((err as { name?: string } | null)?.name === 'AbortError') {
-          return;
-        }
-        if (diffRequestIdRef.current !== requestId) {
+        if (isAbortError(err) || diffRequestIdRef.current !== requestId) {
           return;
         }
         setError(err instanceof Error ? err.message : 'Unknown error');
@@ -911,13 +902,71 @@ function App() {
   );
   fetchDiffDataRef.current = fetchDiffData;
 
+  const fetchCommitDiff = useCallback(
+    async (hash: string) => {
+      const requestId = commitDiffRequestIdRef.current + 1;
+      commitDiffRequestIdRef.current = requestId;
+      activeCommitDiffAbortControllerRef.current?.abort();
+      const controller = new AbortController();
+      activeCommitDiffAbortControllerRef.current = controller;
+      let nextCommitDiffData: DiffResponse | null = null;
+      try {
+        const params = new URLSearchParams({
+          hash,
+          ignoreWhitespace: String(ignoreWhitespace),
+          showFullFile: String(showFullFile),
+        });
+        const response = await fetch(`/api/commit-diff?${params}`, { signal: controller.signal });
+        if (response.ok) {
+          nextCommitDiffData = (await response.json()) as DiffResponse;
+        }
+      } catch (err) {
+        if (isAbortError(err)) {
+          return;
+        }
+      } finally {
+        if (activeCommitDiffAbortControllerRef.current === controller) {
+          activeCommitDiffAbortControllerRef.current = null;
+        }
+      }
+      if (commitDiffRequestIdRef.current !== requestId) {
+        return;
+      }
+      // A failed fetch (e.g. the commit left the range after a rebase) falls back to the whole diff.
+      setCommitDiffData(nextCommitDiffData);
+      setDiffDataVersion((prev) => prev + 1);
+    },
+    [ignoreWhitespace, showFullFile],
+  );
+  fetchCommitDiffRef.current = fetchCommitDiff;
+
+  const showWholeDiff = useCallback(() => {
+    commitDiffRequestIdRef.current += 1;
+    activeCommitDiffAbortControllerRef.current?.abort();
+    setCommitDiffData(null);
+    setDiffDataVersion((prev) => prev + 1);
+  }, []);
+
   useEffect(() => {
     void fetchDiffData();
   }, [fetchDiffData]);
 
   useEffect(() => {
+    const commitHash = selectedCommitHashRef.current;
+    if (commitHash) {
+      void fetchCommitDiff(commitHash);
+    }
+  }, [fetchCommitDiff]);
+
+  useEffect(() => {
     return () => {
       activeDiffAbortControllerRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      activeCommitDiffAbortControllerRef.current?.abort();
     };
   }, []);
 
@@ -1043,48 +1092,27 @@ function App() {
 
       hasUserSelectedRevisionRef.current = true;
       selectedRevisionRef.current = nextSelection;
-      commitScopeRef.current = null;
-      setCommitScope(null);
       setSelectedRevision(nextSelection);
+      showWholeDiff();
       setLoading(true);
       setError(null);
       await fetchDiffData(nextSelection);
     },
-    [fetchDiffData, selectedRevision],
+    [fetchDiffData, selectedRevision, showWholeDiff],
   );
 
   const handleCommitScopeChange = useCallback(
-    async (hash: string | null) => {
-      if (hash === commitScopeRef.current) return;
-
-      commitScopeRef.current = hash;
-      setCommitScope(hash);
-      setLoading(true);
-      setError(null);
-      await fetchDiffData();
+    (hash: string | null) => {
+      if (hash) {
+        void fetchCommitDiff(hash);
+      } else {
+        showWholeDiff();
+      }
     },
-    [fetchDiffData],
+    [fetchCommitDiff, showWholeDiff],
   );
 
-  useEffect(() => {
-    if (!reviewSelectionKey) {
-      return undefined;
-    }
-
-    let cancelled = false;
-    fetch('/api/commits')
-      .then((res) => (res.ok ? (res.json() as Promise<RangeCommitsResponse>) : null))
-      .then((data) => {
-        if (!cancelled) setRangeCommits(data?.commits ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setRangeCommits([]);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [reviewSelectionKey]);
+  const rangeCommits = useRangeCommits(resolvedSelectionKey);
 
   // Clear comments and viewed files on initial load if requested via CLI flag
   const hasCleanedRef = useRef(false);
@@ -1276,6 +1304,7 @@ function App() {
     },
     [addThread],
   );
+  const addCommentHandler = isCommitView ? undefined : handleAddComment;
 
   const handleCopyAllComments = async () => {
     try {
@@ -1328,9 +1357,9 @@ function App() {
   );
 
   const handleNavigateToComment = (thread: CommentThread) => {
-    if (!diffData) return;
+    if (!displayedDiffData) return;
 
-    const position = findCommentPosition(thread, diffData.files);
+    const position = findCommentPosition(thread, displayedDiffData.files);
     if (position) {
       setCursorPosition(position);
     }
@@ -1338,10 +1367,10 @@ function App() {
 
   const showLineInDiff = useCallback(
     (filePath: string, line: number, side: DiffSide = 'new') => {
-      if (!diffData) return;
+      if (!displayedDiffData) return;
 
-      const fileIndex = diffData.files.findIndex((file) => file.path === filePath);
-      const file = diffData.files[fileIndex];
+      const fileIndex = displayedDiffData.files.findIndex((file) => file.path === filePath);
+      const file = displayedDiffData.files[fileIndex];
       if (!file) return;
 
       const position =
@@ -1356,7 +1385,7 @@ function App() {
         }
       });
     },
-    [diffData, scrollFileIntoDiffContainer, setCursorPosition],
+    [displayedDiffData, scrollFileIntoDiffContainer, setCursorPosition],
   );
 
   const handleNavigateToFinding = useCallback(
@@ -1503,7 +1532,7 @@ function App() {
     );
   }
 
-  if (!diffData) {
+  if (!diffData || !displayedDiffData) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-github-bg-primary text-center gap-2">
         <h2 className="text-github-danger text-2xl mb-2">No data</h2>
@@ -1513,7 +1542,7 @@ function App() {
   }
 
   const canOpenInEditor =
-    diffData.openInEditorAvailable !== false &&
+    displayedDiffData.openInEditorAvailable !== false &&
     settings.editor.id !== 'none' &&
     settings.editor.command.trim() !== '' &&
     settings.editor.argsTemplate.trim() !== '';
@@ -1638,7 +1667,7 @@ function App() {
                   Reviewing {doneReviewerCount}/{reviewers.length}
                 </span>
               )}
-              {!isMobile && threads.length > 0 && !isCommitView && (
+              {!isMobile && reviewThreads.length > 0 && (
                 <CommentsDropdown
                   commentsCount={outputThreadCount}
                   isCopiedAll={isCopiedAll}
@@ -1647,36 +1676,38 @@ function App() {
                   onViewAll={() => setIsCommentsListOpen(true)}
                 />
               )}
-              <div className="flex flex-col gap-1 items-center">
-                <div className="text-xs relative">
-                  {viewedFiles.size === diffData.files.length
-                    ? 'All diffs viewed!'
-                    : `${viewedFiles.size} / ${diffData.files.length} files viewed`}
-                  <SparkleAnimation isActive={showSparkles} />
-                </div>
-                <div
-                  className="relative h-2 bg-github-bg-tertiary rounded-full overflow-hidden"
-                  style={{
-                    width: '90px',
-                    border: '1px solid var(--color-github-border)',
-                  }}
-                >
+              {!isCommitView && (
+                <div className="flex flex-col gap-1 items-center">
+                  <div className="text-xs relative">
+                    {viewedFiles.size === diffData.files.length
+                      ? 'All diffs viewed!'
+                      : `${viewedFiles.size} / ${diffData.files.length} files viewed`}
+                    <SparkleAnimation isActive={showSparkles} />
+                  </div>
                   <div
-                    className="absolute top-0 right-0 h-full transition-all duration-300 ease-out"
+                    className="relative h-2 bg-github-bg-tertiary rounded-full overflow-hidden"
                     style={{
-                      width: `${((diffData.files.length - viewedFiles.size) / diffData.files.length) * 100}%`,
-                      backgroundColor: (() => {
-                        const remainingPercent =
-                          ((diffData.files.length - viewedFiles.size) / diffData.files.length) *
-                          100;
-                        if (remainingPercent > 50) return 'var(--color-github-accent)'; // green
-                        if (remainingPercent > 20) return 'var(--color-github-warning)'; // yellow
-                        return 'var(--color-github-danger)'; // red
-                      })(),
+                      width: '90px',
+                      border: '1px solid var(--color-github-border)',
                     }}
-                  />
+                  >
+                    <div
+                      className="absolute top-0 right-0 h-full transition-all duration-300 ease-out"
+                      style={{
+                        width: `${((diffData.files.length - viewedFiles.size) / diffData.files.length) * 100}%`,
+                        backgroundColor: (() => {
+                          const remainingPercent =
+                            ((diffData.files.length - viewedFiles.size) / diffData.files.length) *
+                            100;
+                          if (remainingPercent > 50) return 'var(--color-github-accent)'; // green
+                          if (remainingPercent > 20) return 'var(--color-github-warning)'; // yellow
+                          return 'var(--color-github-danger)'; // red
+                        })(),
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
               {isCommitView && (
                 <span className="text-xs text-github-warning">
                   Read-only: switch to All changes to comment or approve
@@ -1685,8 +1716,8 @@ function App() {
               {rangeCommits.length > 1 && (
                 <CommitScopeSelector
                   commits={rangeCommits}
-                  selectedHash={commitScope}
-                  onSelect={(hash) => void handleCommitScopeChange(hash)}
+                  selectedHash={selectedCommitHash}
+                  onSelect={handleCommitScopeChange}
                 />
               )}
               {revisionOptions ? (
@@ -1703,20 +1734,22 @@ function App() {
                 <span className="text-xs">
                   Reviewing:{' '}
                   <code className="bg-github-bg-tertiary px-1.5 py-0.5 rounded text-xs text-github-text-primary">
-                    {diffData.commit.includes('...') ? (
+                    {displayedDiffData.commit.includes('...') ? (
                       <>
                         <span className="text-github-text-secondary font-medium">
-                          {diffData.commit.split('...')[0]}...
+                          {displayedDiffData.commit.split('...')[0]}...
                         </span>
-                        <span className="font-medium">{diffData.commit.split('...')[1]}</span>
+                        <span className="font-medium">
+                          {displayedDiffData.commit.split('...')[1]}
+                        </span>
                       </>
                     ) : (
-                      diffData.commit
+                      displayedDiffData.commit
                     )}
                   </code>
                 </span>
               )}
-              {diffData.approveAvailable !== false && (
+              {displayedDiffData.approveAvailable !== false && (
                 <div className="flex items-center gap-2">
                   {approveStatus === 'failed' && (
                     <span role="alert" className="text-xs text-github-danger">
@@ -1795,11 +1828,11 @@ function App() {
             >
               <div className="flex-1 overflow-y-auto">
                 <FileList
-                  files={diffData.files}
+                  files={displayedDiffData.files}
                   onScrollToFile={handleScrollToFile}
                   onFileSelected={isMobile ? handleMobileFileSelected : undefined}
                   comments={humanCommentThreads}
-                  findingCounts={isCommitView ? EMPTY_FINDING_COUNTS : openFindingCounts}
+                  findingCounts={openFindingCounts}
                   reviewedFiles={viewedFiles}
                   onToggleReviewed={toggleFileReviewed}
                   onToggleFolderReviewed={toggleFolderReviewed}
@@ -1870,7 +1903,7 @@ function App() {
             }`}
             onClickCapture={handleSymbolClickCapture}
           >
-            {diffData.files.map((file, fileIndex) => {
+            {displayedDiffData.files.map((file, fileIndex) => {
               const fileThreads = threadsByFile.get(file.path) ?? EMPTY_COMMENT_THREADS;
               const mergedChunks =
                 getMergedChunksForVersion(mergedChunksState, diffDataVersion, file.path) ??
@@ -1905,7 +1938,7 @@ function App() {
                       collapsedFiles={collapsedFiles}
                       onToggleCollapsed={toggleFileCollapsed}
                       onToggleAllCollapsed={toggleAllFilesCollapsed}
-                      onAddComment={isCommitView ? undefined : handleAddComment}
+                      onAddComment={addCommentHandler}
                       onGenerateThreadPrompt={handleGenerateThreadPrompt}
                       onRemoveThread={removeThread}
                       onReplyToThread={handleReplyToThread}
@@ -1913,8 +1946,8 @@ function App() {
                       onUpdateMessage={updateMessage}
                       onOpenInEditor={canOpenInEditor ? handleOpenInEditor : undefined}
                       syntaxTheme={settings.syntaxTheme}
-                      baseCommitish={diffData.baseCommitish}
-                      targetCommitish={diffData.targetCommitish}
+                      baseCommitish={displayedDiffData.baseCommitish}
+                      targetCommitish={displayedDiffData.targetCommitish}
                       cursor={cursor?.fileIndex === fileIndex ? cursor : null}
                       isFocused={cursor?.fileIndex === fileIndex}
                       fileIndex={fileIndex}
@@ -1965,7 +1998,7 @@ function App() {
           {activeTab === 'files' && !isMobile && (
             <DiffMinimap
               scrollContainerRef={diffScrollContainerRef}
-              files={diffData.files}
+              files={displayedDiffData.files}
               threads={diffVisibleThreads}
               collapsedFiles={collapsedFiles}
             />

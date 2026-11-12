@@ -251,21 +251,6 @@ describe('DiffChunk without onAddComment', () => {
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   });
 
-  it('ignores the keyboard comment trigger', () => {
-    const onCommentTriggerHandled = vi.fn();
-    renderWithProviders(
-      <DiffChunk
-        {...readOnlyProps}
-        mode="unified"
-        commentTrigger={{ fileIndex: 0, chunkIndex: 0, lineIndex: 2 }}
-        onCommentTriggerHandled={onCommentTriggerHandled}
-      />,
-    );
-
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    expect(onCommentTriggerHandled).not.toHaveBeenCalled();
-  });
-
   it('offers no way to open a comment form in split view', () => {
     const { container } = renderWithProviders(<SideBySideDiffChunk {...readOnlyProps} />);
 

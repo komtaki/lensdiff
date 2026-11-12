@@ -11,6 +11,7 @@ import pkg from '../../package.json' with { type: 'json' };
 import { FileWatcherService } from './file-watcher.js';
 import { startServer } from './server.js';
 import type { CommentImport } from '../types/diff.js';
+import { DiffMode } from '../types/watch.js';
 
 // Add fetch polyfill for Node.js test environment
 const { fetch } = await import('undici');
@@ -89,8 +90,8 @@ vi.mock('./git-diff.js', () => {
     });
     clearResolvedCommitCache = vi.fn();
     getRangeCommits = vi.fn().mockResolvedValue([
-      { hash: 'a'.repeat(40), shortHash: 'aaaaaaa', subject: 'First', diffBase: 'b'.repeat(40) },
-      { hash: 'c'.repeat(40), shortHash: 'ccccccc', subject: 'Second', diffBase: 'a'.repeat(40) },
+      { hash: 'a'.repeat(40), shortHash: 'aaaaaaa', message: 'First', diffBase: 'b'.repeat(40) },
+      { hash: 'c'.repeat(40), shortHash: 'ccccccc', message: 'Second', diffBase: 'a'.repeat(40) },
     ]);
     getRevisionOptions = vi.fn().mockResolvedValue({
       branches: [{ name: 'main', current: true }],
@@ -2000,11 +2001,43 @@ describe('Server Integration Tests', () => {
       expect(response.ok).toBe(true);
       expect(await response.json()).toEqual({
         commits: [
-          { hash: 'a'.repeat(40), shortHash: 'aaaaaaa', subject: 'First' },
-          { hash: secondCommitHash, shortHash: 'ccccccc', subject: 'Second' },
+          { hash: 'a'.repeat(40), shortHash: 'aaaaaaa', message: 'First' },
+          { hash: secondCommitHash, shortHash: 'ccccccc', message: 'Second' },
         ],
       });
       expect(parserInstances.at(-1).getRangeCommits).toHaveBeenCalledWith(initialSelection);
+    });
+
+    it('reuses the range commits until the cache is invalidated', async () => {
+      const { port, server } = await startServer({ selection: initialSelection });
+      servers.push(server);
+      const parser = parserInstances.at(-1);
+
+      await fetch(`http://localhost:${port}/api/commits`);
+      await fetch(`http://localhost:${port}/api/commit-diff?hash=${secondCommitHash}`);
+
+      expect(parser.getRangeCommits).toHaveBeenCalledTimes(1);
+    });
+
+    it('lists the range commits again after the file watcher invalidates the cache', async () => {
+      const startSpy = vi.spyOn(FileWatcherService.prototype, 'start').mockResolvedValue();
+      try {
+        const { port, server } = await startServer({
+          selection: initialSelection,
+          diffMode: DiffMode.DEFAULT,
+        });
+        servers.push(server);
+        const parser = parserInstances.at(-1);
+        const invalidateCache = startSpy.mock.calls[0]?.[3] as () => void;
+
+        await fetch(`http://localhost:${port}/api/commits`);
+        invalidateCache();
+        await fetch(`http://localhost:${port}/api/commits`);
+
+        expect(parser.getRangeCommits).toHaveBeenCalledTimes(2);
+      } finally {
+        startSpy.mockRestore();
+      }
     });
 
     it('returns no commits for a stdin diff', async () => {

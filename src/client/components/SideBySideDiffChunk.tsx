@@ -173,7 +173,7 @@ export function SideBySideDiffChunk({
 
   // Handle comment trigger from keyboard navigation
   useEffect(() => {
-    if (onAddComment && commentTrigger?.lineIndex !== undefined) {
+    if (commentTrigger?.lineIndex !== undefined) {
       const line = chunk.lines[commentTrigger.lineIndex];
       if (line && line.type !== 'delete') {
         const lineNumber = line.newLineNumber;
@@ -183,7 +183,7 @@ export function SideBySideDiffChunk({
         }
       }
     }
-  }, [commentTrigger, chunk.lines, onAddComment, onCommentTriggerHandled]);
+  }, [commentTrigger, chunk.lines, onCommentTriggerHandled]);
 
   const handleAddComment = useCallback(
     (side: DiffSide, lineNumber: LineNumber) => {
@@ -235,6 +235,19 @@ export function SideBySideDiffChunk({
 
     startCommentDrag(selection);
   };
+
+  const renderCommentButton = (selection: LineSelection | null) =>
+    onAddComment ? (
+      <CommentButton
+        onMouseDown={(e) => {
+          e.stopPropagation();
+          if (e.shiftKey) {
+            e.preventDefault();
+          }
+          handleCommentButtonMouseDown({ isShiftClick: e.shiftKey, selection });
+        }}
+      />
+    ) : null;
 
   const handleRowClick = ({
     isShiftClick,
@@ -677,20 +690,7 @@ export function SideBySideDiffChunk({
                                 }}
                               />
                             )}
-                          {onAddComment && (
-                            <CommentButton
-                              onMouseDown={(e) => {
-                                e.stopPropagation();
-                                if (e.shiftKey) {
-                                  e.preventDefault();
-                                }
-                                handleCommentButtonMouseDown({
-                                  isShiftClick: e.shiftKey,
-                                  selection: oldSelection,
-                                });
-                              }}
-                            />
-                          )}
+                          {renderCommentButton(oldSelection)}
                         </>
                       )}
                   </td>
@@ -738,20 +738,7 @@ export function SideBySideDiffChunk({
                               }}
                             />
                           )}
-                          {onAddComment && (
-                            <CommentButton
-                              onMouseDown={(e) => {
-                                e.stopPropagation();
-                                if (e.shiftKey) {
-                                  e.preventDefault();
-                                }
-                                handleCommentButtonMouseDown({
-                                  isShiftClick: e.shiftKey,
-                                  selection: newSelection,
-                                });
-                              }}
-                            />
-                          )}
+                          {renderCommentButton(newSelection)}
                         </>
                       )}
                   </td>

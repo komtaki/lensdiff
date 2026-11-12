@@ -38,6 +38,10 @@ export function getDiffSelectionKey(selection: DiffSelection): string {
   return `${selection.baseCommitish}:${selection.targetCommitish}:${normalizeBaseMode(selection.baseMode)}`;
 }
 
+export function isSpecialCommitish(commitish: string): boolean {
+  return commitish === '.' || commitish === 'staged' || commitish === 'working';
+}
+
 export function getMergeBaseTargetRef(targetCommitish: string): string {
   if (targetCommitish === '.' || targetCommitish === 'staged' || targetCommitish === 'working') {
     return 'HEAD';

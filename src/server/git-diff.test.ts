@@ -1627,8 +1627,8 @@ index abc123..def456 100644
           args[0] === 'merge-base'
             ? 'm'.repeat(40) + '\n'
             : [
-                `${'a'.repeat(40)}\0aaaaaaa\0${'m'.repeat(40)}\0First change`,
-                `${'c'.repeat(40)}\0ccccccc\0${'a'.repeat(40)} ${'x'.repeat(40)}\0Merge branch`,
+                `${'a'.repeat(40)}\0${'m'.repeat(40)}\0First change`,
+                `${'c'.repeat(40)}\0${'a'.repeat(40)} ${'x'.repeat(40)}\0Merge branch`,
                 '',
               ].join('\n'),
         ),
@@ -1643,27 +1643,27 @@ index abc123..def456 100644
       expect(gitRaw).toHaveBeenCalledWith([
         'log',
         '--reverse',
-        '--format=%H%x00%h%x00%P%x00%s',
+        '--format=%H%x00%P%x00%s',
         `${'m'.repeat(40)}..HEAD`,
       ]);
       expect(commits).toEqual([
         {
           hash: 'a'.repeat(40),
           shortHash: 'aaaaaaa',
-          subject: 'First change',
+          message: 'First change',
           diffBase: 'm'.repeat(40),
         },
         {
           hash: 'c'.repeat(40),
           shortHash: 'ccccccc',
-          subject: 'Merge branch',
+          message: 'Merge branch',
           diffBase: 'a'.repeat(40),
         },
       ]);
     });
 
     it('diffs a root commit against the empty tree', async () => {
-      (parser as any).git.raw.mockResolvedValue(`${'a'.repeat(40)}\0aaaaaaa\0\0Initial\n`);
+      (parser as any).git.raw.mockResolvedValue(`${'a'.repeat(40)}\0\0Initial\n`);
 
       const commits = await parser.getRangeCommits({
         baseCommitish: 'other-root',

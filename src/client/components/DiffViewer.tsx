@@ -245,9 +245,8 @@ export const DiffViewer = memo(function DiffViewer({
 
   const handleAddComment = useCallback(
     async (line: LineNumber, body: string, codeContent?: string, side?: DiffSide) => {
-      if (!onAddComment) return;
       try {
-        await onAddComment(file.path, line, body, codeContent, side);
+        await onAddComment?.(file.path, line, body, codeContent, side);
       } catch (error) {
         console.error('Failed to add comment:', error);
       }

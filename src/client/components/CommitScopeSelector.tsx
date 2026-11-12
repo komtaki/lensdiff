@@ -1,11 +1,11 @@
 import { GitCommitHorizontal } from 'lucide-react';
 
-import { type RangeCommit } from '../../types/diff';
+import { type CommitInfo } from '../../types/diff';
 
 const ALL_CHANGES_VALUE = '';
 
 interface CommitScopeSelectorProps {
-  commits: RangeCommit[];
+  commits: CommitInfo[];
   selectedHash: string | null;
   onSelect: (hash: string | null) => void;
 }
@@ -24,7 +24,7 @@ export function CommitScopeSelector({ commits, selectedHash, onSelect }: CommitS
         <option value={ALL_CHANGES_VALUE}>All changes ({commits.length} commits)</option>
         {commits.map((commit, index) => (
           <option key={commit.hash} value={commit.hash}>
-            {index + 1}. {commit.shortHash} {commit.subject}
+            {index + 1}. {commit.shortHash} {commit.message}
           </option>
         ))}
       </select>
