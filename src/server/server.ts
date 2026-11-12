@@ -812,10 +812,16 @@ export async function startServer(
   }
 
   function parseCommentsPayload(body: unknown): DiffCommentThread[] {
-    const payload = body as {
-      comments?: Comment[];
-      threads?: Array<CommentThread | DiffCommentThread>;
-    };
+    const payload =
+      typeof body === 'string'
+        ? (JSON.parse(body) as {
+            comments?: Comment[];
+            threads?: Array<CommentThread | DiffCommentThread>;
+          })
+        : (body as {
+            comments?: Comment[];
+            threads?: Array<CommentThread | DiffCommentThread>;
+          });
 
     if (Array.isArray(payload.threads)) {
       return payload.threads.map(normalizeThreadPayload);

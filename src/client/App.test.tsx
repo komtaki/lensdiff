@@ -177,6 +177,11 @@ const renderAppUntilCommentsBootstrapped = async () => {
   return rendered;
 };
 
+const flushPendingRequests = () =>
+  act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
 const getCommentPostCalls = () =>
   vi
     .mocked(global.fetch)
@@ -689,6 +694,176 @@ describe('App Component - Comment sync', () => {
       baseVersion: 1,
       upserts: [],
       deletedIds: ['test-1'],
+    });
+  });
+
+  it('sends a change again in the next sync when posting it failed', async () => {
+    const firstThread = createMockThread({ id: 't1', filePath: 'test.ts', line: 1, body: 'first' });
+    const secondThread = createMockThread({
+      id: 't2',
+      filePath: 'test.ts',
+      line: 2,
+      body: 'second',
+    });
+    mockComments = [firstThread];
+    mockReviewFetch(
+      { '/api/comments-json': { version: 1, threads: [] } },
+      { '/api/comments': 500 },
+    );
+
+    const { rerender } = renderApp();
+    await waitFor(() => {
+      expect(getCommentPostCalls()).toHaveLength(1);
+    });
+    await flushPendingRequests();
+    mockComments = [firstThread, secondThread];
+    rerender(appTree());
+
+    await waitFor(() => {
+      expect(getCommentPostCalls()).toHaveLength(2);
+    });
+    expect(JSON.parse(String(getCommentPostCalls()[1]![1].body))).toEqual({
+      baseVersion: 1,
+      upserts: [firstThread, secondThread],
+      deletedIds: [],
+    });
+  });
+
+  it('treats threads adopted from a merged response as acknowledged', async () => {
+    const humanThread = createMockThread({ id: 't1', filePath: 'test.ts', line: 1, body: 'mine' });
+    const agentThread = createMockThread({
+      id: 'agent-1',
+      filePath: 'test.ts',
+      line: 2,
+      body: 'agent finding',
+      author: 'Agent',
+    });
+    mockComments = [humanThread];
+    mockReviewFetch({
+      '/api/comments-json': { version: 1, threads: [] },
+      '/api/comments': {
+        success: true,
+        merged: true,
+        version: 3,
+        threads: [humanThread, agentThread],
+      },
+    });
+
+    const { rerender } = renderApp();
+    await waitFor(() => {
+      expect(mockReplaceThreads).toHaveBeenCalledWith([humanThread, agentThread]);
+    });
+    mockComments = [humanThread, agentThread];
+    rerender(appTree());
+    await flushPendingRequests();
+    expect(getCommentPostCalls()).toHaveLength(1);
+
+    mockComments = [humanThread];
+    rerender(appTree());
+
+    await waitFor(() => {
+      expect(getCommentPostCalls()).toHaveLength(2);
+    });
+    expect(JSON.parse(String(getCommentPostCalls()[1]![1].body))).toEqual({
+      baseVersion: 3,
+      upserts: [],
+      deletedIds: ['agent-1'],
+    });
+  });
+
+  it('ignores a sync response for the previous comparison after switching', async () => {
+    const currentThread = createMockThread({
+      id: 't1',
+      filePath: 'test.ts',
+      line: 1,
+      body: 'current comparison',
+    });
+    const previousThread = createMockThread({
+      id: 't2',
+      filePath: 'test.ts',
+      line: 2,
+      body: 'previous comparison',
+    });
+    const previousDiffResponse: DiffResponse = {
+      ...mockDiffResponse,
+      baseCommitish: 'HEAD^^',
+      targetCommitish: 'HEAD^',
+      requestedBaseCommitish: 'HEAD^^',
+      requestedTargetCommitish: 'HEAD^',
+    };
+    const respondWith = (body: unknown) =>
+      Promise.resolve({ ok: true, json: async () => body } as Response);
+    let resolveCurrentPost: (response: Response) => void = () => {};
+    vi.mocked(global.fetch).mockImplementation((input) => {
+      const url = String(input);
+      const isPreviousComparison = url.includes('base=HEAD%5E%5E');
+      if (url.startsWith('/api/revisions')) {
+        return respondWith({
+          specialOptions: [],
+          branches: [],
+          commits: [{ hash: 'abc1234', shortHash: 'abc1234', message: 'Test commit' }],
+        });
+      }
+      if (url.startsWith('/api/comments-json')) {
+        return respondWith(
+          isPreviousComparison
+            ? { version: 5, threads: [previousThread] }
+            : { version: 1, threads: [] },
+        );
+      }
+      if (url.startsWith('/api/comments?')) {
+        if (isPreviousComparison) {
+          return respondWith({ success: true, merged: false, version: 6 });
+        }
+        return new Promise<Response>((resolve) => {
+          resolveCurrentPost = resolve;
+        });
+      }
+      return respondWith(isPreviousComparison ? previousDiffResponse : mockDiffResponse);
+    });
+    mockComments = [currentThread];
+
+    const { rerender } = renderApp();
+    await waitFor(() => {
+      expect(getCommentPostCalls()).toHaveLength(1);
+    });
+    mockComments = [previousThread];
+    fireEvent.click(await screen.findByRole('button', { name: /Revision menu:/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Previous commit' }));
+    await waitFor(() => {
+      expect(
+        vi
+          .mocked(global.fetch)
+          .mock.calls.some(([url]) => String(url).startsWith('/api/comments-json?base=HEAD%5E%5E')),
+      ).toBe(true);
+    });
+    await flushPendingRequests();
+    await act(async () => {
+      resolveCurrentPost({
+        ok: true,
+        json: async () => ({ success: true, merged: false, version: 2 }),
+      } as Response);
+    });
+    await flushPendingRequests();
+
+    const editedPreviousThread = createMockThread({
+      id: 't2',
+      filePath: 'test.ts',
+      line: 2,
+      body: 'edited',
+    });
+    mockComments = [editedPreviousThread];
+    rerender(appTree());
+
+    await waitFor(() => {
+      expect(getCommentPostCalls()).toHaveLength(2);
+    });
+    const [url, request] = getCommentPostCalls()[1]!;
+    expect(url).toBe('/api/comments?base=HEAD%5E%5E&target=HEAD%5E');
+    expect(JSON.parse(String(request.body))).toEqual({
+      baseVersion: 5,
+      upserts: [editedPreviousThread],
+      deletedIds: [],
     });
   });
 
@@ -1493,6 +1668,10 @@ describe('App Component - Approve', () => {
       { '/api/comments': 500 },
     );
     renderApp();
+    await waitFor(() => {
+      expect(getCommentPostCalls()).toHaveLength(1);
+    });
+    await flushPendingRequests();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
 

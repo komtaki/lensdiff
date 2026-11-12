@@ -303,6 +303,9 @@ function App() {
   const serverCommentVersionRef = useRef<number | null>(null);
   // Threads the server is known to hold; only the difference from them is sent.
   const acknowledgedThreadsRef = useRef(new Map<string, string>());
+  // Responses for a comparison the user already left must not overwrite the new comparison's state.
+  const latestCommentsContextKeyRef = useRef(commentsContextKey);
+  latestCommentsContextKeyRef.current = commentsContextKey;
   const pendingBootstrapAfterLocalResetRef = useRef(false);
 
   useEffect(() => {
@@ -321,13 +324,16 @@ function App() {
       version?: number;
       threads?: DiffCommentThread[];
     };
+    const serverThreads = Array.isArray(payload.threads) ? payload.threads : [];
+    if (latestCommentsContextKeyRef.current !== commentsContextKey) {
+      return serverThreads;
+    }
     if (typeof payload.version === 'number') {
       serverCommentVersionRef.current = payload.version;
     }
-    const serverThreads = Array.isArray(payload.threads) ? payload.threads : [];
     acknowledgedThreadsRef.current = snapshotCommentThreads(serverThreads);
     return serverThreads;
-  }, [getCommentApiUrl]);
+  }, [commentsContextKey, getCommentApiUrl]);
 
   const serializeCommentChanges = useCallback((nextThreads: DiffCommentThread[]) => {
     const changes = diffCommentThreads(acknowledgedThreadsRef.current, nextThreads);
@@ -360,6 +366,9 @@ function App() {
         merged?: boolean;
         threads?: DiffCommentThread[];
       };
+      if (latestCommentsContextKeyRef.current !== commentsContextKey) {
+        return;
+      }
       if (typeof result.version === 'number') {
         serverCommentVersionRef.current = result.version;
       }
@@ -372,7 +381,7 @@ function App() {
       }
       acknowledgedThreadsRef.current = snapshotCommentThreads(nextThreads);
     },
-    [getCommentApiUrl, replaceThreads, serializeCommentChanges],
+    [commentsContextKey, getCommentApiUrl, replaceThreads, serializeCommentChanges],
   );
 
   // Viewed files management
