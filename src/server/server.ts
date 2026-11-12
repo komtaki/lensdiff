@@ -24,6 +24,10 @@ import {
   NONE_EDITOR_ID,
   resolveEditorOption,
 } from '../utils/editorOptions.js';
+import {
+  applyCommentThreadChanges,
+  type CommentThreadChanges,
+} from '../utils/commentThreadChanges.js';
 import { getFileExtension } from '../utils/fileUtils.js';
 import { selectThreadsForOutput } from '../utils/reviewOutput.js';
 
@@ -830,6 +834,21 @@ export async function startServer(
     return [];
   }
 
+  function parseCommentThreadChanges(body: unknown): CommentThreadChanges | null {
+    if (!body || typeof body !== 'object') return null;
+    const { upserts, deletedIds } = body as {
+      upserts?: Array<CommentThread | DiffCommentThread>;
+      deletedIds?: unknown[];
+    };
+    if (!Array.isArray(upserts) && !Array.isArray(deletedIds)) return null;
+    return {
+      upserts: Array.isArray(upserts) ? upserts.map(normalizeThreadPayload) : [],
+      deletedIds: Array.isArray(deletedIds)
+        ? deletedIds.filter((id): id is string => typeof id === 'string')
+        : [],
+    };
+  }
+
   // Version the client based its push on (omitted by older clients).
   function parseBaseVersion(payload: unknown): number | undefined {
     if (!payload || typeof payload !== 'object') return undefined;
@@ -885,16 +904,25 @@ export async function startServer(
     const selection = getCommentSelectionFromQuery(req.query as Record<string, unknown>);
     const body: unknown =
       typeof req.body === 'string' ? (JSON.parse(req.body) as unknown) : req.body;
-    const nextThreads = parseCommentsPayload(body);
     const baseVersion = parseBaseVersion(body);
     const session = getOrCreateCommentSession(selection);
 
     // Stale baseVersion means another writer (e.g. an agent) changed comments since the
     // client's last read, so merge rather than overwrite. A matching/absent version replaces.
+    // Explicit deletions in a change set are honored even when stale.
     const isStale = typeof baseVersion === 'number' && baseVersion !== session.version;
-    const resolvedThreads = isStale
-      ? mergeCommentThreads(session.threads, nextThreads).threads
-      : nextThreads;
+    const changes = parseCommentThreadChanges(body);
+    let resolvedThreads: DiffCommentThread[];
+    if (changes) {
+      resolvedThreads = applyCommentThreadChanges(session.threads, changes, {
+        mergeConcurrent: isStale,
+      });
+    } else {
+      const nextThreads = parseCommentsPayload(body);
+      resolvedThreads = isStale
+        ? mergeCommentThreads(session.threads, nextThreads).threads
+        : nextThreads;
+    }
     const previousThreads = session.threads;
 
     updateCommentSession(selection, resolvedThreads);
@@ -911,7 +939,7 @@ export async function startServer(
         success: true,
         merged: isStale,
         version: session.version,
-        threads: session.threads,
+        ...(isStale ? { threads: session.threads } : {}),
       });
     } catch (error) {
       console.error('Error parsing comments:', error);

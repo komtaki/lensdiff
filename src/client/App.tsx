@@ -22,6 +22,11 @@ import {
 import { DEFAULT_DIFF_VIEW_MODE, normalizeDiffViewMode } from '../utils/diffMode';
 import { getThreadKind, mergeCommentThreads } from '../utils/commentImports';
 import {
+  diffCommentThreads,
+  hasCommentThreadChanges,
+  snapshotCommentThreads,
+} from '../utils/commentThreadChanges';
+import {
   createDiffSelection,
   diffSelectionsEqual,
   getDiffSelectionKey,
@@ -296,6 +301,11 @@ function App() {
   const skipNextCommentSyncRef = useRef(false);
   // Last server comment version seen; echoed back as baseVersion so the server can detect concurrent writes.
   const serverCommentVersionRef = useRef<number | null>(null);
+  // Threads the server is known to hold; only the difference from them is sent.
+  const acknowledgedThreadsRef = useRef(new Map<string, string>());
+  // Responses for a comparison the user already left must not overwrite the new comparison's state.
+  const latestCommentsContextKeyRef = useRef(commentsContextKey);
+  latestCommentsContextKeyRef.current = commentsContextKey;
   const pendingBootstrapAfterLocalResetRef = useRef(false);
 
   useEffect(() => {
@@ -314,27 +324,38 @@ function App() {
       version?: number;
       threads?: DiffCommentThread[];
     };
+    const serverThreads = Array.isArray(payload.threads) ? payload.threads : [];
+    if (latestCommentsContextKeyRef.current !== commentsContextKey) {
+      return serverThreads;
+    }
     if (typeof payload.version === 'number') {
       serverCommentVersionRef.current = payload.version;
     }
-    return Array.isArray(payload.threads) ? payload.threads : [];
-  }, [getCommentApiUrl]);
+    acknowledgedThreadsRef.current = snapshotCommentThreads(serverThreads);
+    return serverThreads;
+  }, [commentsContextKey, getCommentApiUrl]);
 
-  const serializeCommentsPayload = useCallback(
-    (nextThreads: DiffCommentThread[]) =>
-      JSON.stringify({
-        threads: nextThreads,
+  const serializeCommentChanges = useCallback((nextThreads: DiffCommentThread[]) => {
+    const changes = diffCommentThreads(acknowledgedThreadsRef.current, nextThreads);
+    return {
+      hasChanges: hasCommentThreadChanges(changes),
+      body: JSON.stringify({
         baseVersion: serverCommentVersionRef.current ?? undefined,
+        ...changes,
       }),
-    [],
-  );
+    };
+  }, []);
 
   const syncThreadsToServer = useCallback(
     async (nextThreads: DiffCommentThread[]) => {
+      const { hasChanges, body } = serializeCommentChanges(nextThreads);
+      if (!hasChanges) {
+        return;
+      }
       const response = await fetch(getCommentApiUrl('/api/comments'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: serializeCommentsPayload(nextThreads),
+        body,
       });
       if (!response.ok) {
         return;
@@ -345,16 +366,22 @@ function App() {
         merged?: boolean;
         threads?: DiffCommentThread[];
       };
+      if (latestCommentsContextKeyRef.current !== commentsContextKey) {
+        return;
+      }
       if (typeof result.version === 'number') {
         serverCommentVersionRef.current = result.version;
       }
       // Server merged in a concurrent change; adopt it so we don't push a stale set back.
       if (result.merged && Array.isArray(result.threads)) {
+        acknowledgedThreadsRef.current = snapshotCommentThreads(result.threads);
         skipNextCommentSyncRef.current = true;
         replaceThreads(result.threads);
+        return;
       }
+      acknowledgedThreadsRef.current = snapshotCommentThreads(nextThreads);
     },
-    [getCommentApiUrl, replaceThreads, serializeCommentsPayload],
+    [commentsContextKey, getCommentApiUrl, replaceThreads, serializeCommentChanges],
   );
 
   // Viewed files management
@@ -1130,13 +1157,14 @@ function App() {
       return;
     }
 
-    const data = serializeCommentsPayload(threads);
     const commentsApiUrl = getCommentApiUrl('/api/comments');
 
-    // Also handle page unload
     const sendCommentsBeforeUnload = () => {
-      // Use sendBeacon for reliable delivery during page unload, including empty states.
-      navigator.sendBeacon(commentsApiUrl, data);
+      // sendBeacon caps the body at about 64KB, so only unacknowledged changes are sent.
+      const { hasChanges, body } = serializeCommentChanges(threads);
+      if (hasChanges) {
+        navigator.sendBeacon(commentsApiUrl, body);
+      }
     };
 
     window.addEventListener('beforeunload', sendCommentsBeforeUnload);
@@ -1159,7 +1187,7 @@ function App() {
     getCommentApiUrl,
     hasBootstrappedComments,
     isApproved,
-    serializeCommentsPayload,
+    serializeCommentChanges,
     syncThreadsToServer,
     threads,
   ]);
@@ -1239,7 +1267,7 @@ function App() {
       const response = await fetch(getCommentApiUrl('/api/approve'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: serializeCommentsPayload(threads),
+        body: serializeCommentChanges(threads).body,
       });
       if (!response.ok) {
         throw new Error(`${response.status} ${response.statusText}`);
