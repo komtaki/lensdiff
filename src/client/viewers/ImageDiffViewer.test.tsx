@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import type { DiffFile } from '../../types/diff';
@@ -194,6 +195,43 @@ describe('ImageDiffViewer', () => {
         expect(screen.getByText(/W: 800px \| H: 600px/)).toBeInTheDocument();
         expect(screen.getByText(/1\.0 KB/)).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('Image zoom', () => {
+    const modifiedFile: DiffFile = {
+      path: 'test.png',
+      oldPath: 'test.png',
+      status: 'modified',
+      additions: 1,
+      deletions: 1,
+      chunks: [],
+    };
+
+    it.each(['split', 'unified'] as const)(
+      'opens the clicked version in the lightbox in %s mode',
+      async (diffMode) => {
+        const user = userEvent.setup();
+        renderViewer(modifiedFile, { diffMode });
+
+        await user.click(screen.getByRole('img', { name: 'Current version of test.png' }));
+
+        expect(
+          within(screen.getByRole('dialog')).getByRole('img', {
+            name: 'Current version of test.png',
+          }),
+        ).toHaveAttribute('src', '/api/blob/test.png?ref=HEAD');
+      },
+    );
+
+    it('keeps the load error message for an image that fails to load', () => {
+      renderViewer({ ...modifiedFile, status: 'added' });
+
+      const image = screen.getByRole('img');
+      fireEvent.error(image);
+
+      expect(image.style.display).toBe('none');
+      expect(screen.getByText('Image could not be loaded')).not.toHaveClass('hidden');
     });
   });
 });

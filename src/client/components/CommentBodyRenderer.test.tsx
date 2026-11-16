@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
 import { WordHighlightProvider } from '../contexts/WordHighlightContext';
@@ -148,5 +149,25 @@ describe('CommentBodyRenderer', () => {
     expect(container.querySelector('strong')).toHaveTextContent('Before');
     expect(container.querySelector('em')).toHaveTextContent('After');
     expect(container).toHaveTextContent('new code');
+  });
+
+  it('opens a markdown image in the lightbox when clicked', async () => {
+    const user = userEvent.setup();
+    render(<CommentBodyRenderer body="![screenshot](/images/shot.png)" />);
+
+    await user.click(screen.getByRole('img', { name: 'screenshot' }));
+
+    expect(
+      within(screen.getByRole('dialog')).getByRole('img', { name: 'screenshot' }),
+    ).toHaveAttribute('src', '/images/shot.png');
+  });
+
+  it('follows the link instead of zooming when the image is inside a link', async () => {
+    const user = userEvent.setup();
+    render(<CommentBodyRenderer body="[![badge](/images/badge.svg)](#badges)" />);
+
+    await user.click(screen.getByRole('img', { name: 'badge' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });

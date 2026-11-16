@@ -10,6 +10,7 @@ import { extractMarkdownText, isElementWithCodeProps, isSafeUrl } from '../utils
 import { DiffCodeLine } from './DiffCodeLine';
 import { PrismSyntaxHighlighter } from './PrismSyntaxHighlighter';
 import type { AppearanceSettings } from './SettingsModal';
+import { ZoomableImage } from './ZoomableImage';
 
 const COMMENT_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 
@@ -148,7 +149,7 @@ const getCommentMarkdownComponents = (syntaxTheme?: AppearanceSettings['syntaxTh
       return null;
     }
     return (
-      <img
+      <ZoomableImage
         src={safeSrc}
         alt={alt ?? ''}
         loading="lazy"

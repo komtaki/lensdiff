@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import type { DiffLine } from '../../types/diff';
 import { EnhancedPrismSyntaxHighlighter } from '../components/EnhancedPrismSyntaxHighlighter';
 import { PrismSyntaxHighlighter } from '../components/PrismSyntaxHighlighter';
+import { ZoomableImage } from '../components/ZoomableImage';
 import type { MergedChunk } from '../hooks/useExpandedLines';
 import { extractMarkdownText, isElementWithCodeProps, isSafeUrl } from '../utils/markdownUtils';
 
@@ -645,7 +646,7 @@ const getMarkdownComponents = (syntaxTheme?: DiffViewerBodyProps['syntaxTheme'])
       return null;
     }
     return (
-      <img
+      <ZoomableImage
         src={safeSrc}
         alt={alt ?? ''}
         loading="lazy"

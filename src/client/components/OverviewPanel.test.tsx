@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -52,5 +52,16 @@ describe('OverviewPanel', () => {
     expect(screen.getByText('security')).toBeInTheDocument();
     expect(screen.getByText('running')).toBeInTheDocument();
     expect(screen.getByText('done · 2 findings')).toBeInTheDocument();
+  });
+
+  it('opens overview images in the lightbox when clicked', async () => {
+    const user = userEvent.setup();
+    renderPanel('![architecture](/images/architecture.png)');
+
+    await user.click(screen.getByRole('img', { name: 'architecture' }));
+
+    expect(
+      within(screen.getByRole('dialog')).getByRole('img', { name: 'architecture' }),
+    ).toHaveAttribute('src', '/images/architecture.png');
   });
 });

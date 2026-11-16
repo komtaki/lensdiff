@@ -6,6 +6,7 @@ import type { DiffFile, DiffLine } from '../../types/diff';
 import { FrontmatterTable } from '../components/FrontmatterTable';
 import { MermaidDiagram } from '../components/MermaidDiagram';
 import { PrismSyntaxHighlighter } from '../components/PrismSyntaxHighlighter';
+import { ZoomableImage } from '../components/ZoomableImage';
 import type { MergedChunk } from '../hooks/useExpandedLines';
 import { extractFrontmatter, getFrontmatterLines } from '../utils/frontmatter';
 import { computeFrontmatterDiff } from '../utils/frontmatterDiff';
@@ -263,7 +264,7 @@ export const getMarkdownComponents = (syntaxTheme?: DiffViewerBodyProps['syntaxT
       return null;
     }
     return (
-      <img
+      <ZoomableImage
         src={safeSrc}
         alt={alt ?? ''}
         loading="lazy"
