@@ -73,7 +73,7 @@ describe('resolveServerCommand', () => {
   it.each([
     ['ruby', 'ruby-lsp', []],
     ['typescript', 'typescript-language-server', ['--stdio']],
-    ['python', 'uvx', ['pyrefly', 'lsp']],
+    ['python', 'uvx', ['pyrefly@1.4.1', 'lsp']],
   ] as const)('starts %s with %s', (language, command, args) => {
     expect(resolveServerCommand(language, repoPath)).toEqual({ command, args });
   });
@@ -141,7 +141,7 @@ describe('resolveServerCommand', () => {
 
       expect(resolveServerCommand('python', repoPath)).toEqual({
         command: shim,
-        args: ['pyrefly', 'lsp'],
+        args: ['pyrefly@1.4.1', 'lsp'],
       });
     });
 
