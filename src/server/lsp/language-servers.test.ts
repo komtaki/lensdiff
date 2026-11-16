@@ -73,7 +73,7 @@ describe('resolveServerCommand', () => {
   it.each([
     ['ruby', 'ruby-lsp', []],
     ['typescript', 'typescript-language-server', ['--stdio']],
-    ['python', 'pyright-langserver', ['--stdio']],
+    ['python', 'uvx', ['pyrefly', 'lsp']],
   ] as const)('starts %s with %s', (language, command, args) => {
     expect(resolveServerCommand(language, repoPath)).toEqual({ command, args });
   });
@@ -97,6 +97,16 @@ describe('resolveServerCommand', () => {
     expect(resolveServerCommand('ruby', repoPath)).toEqual({
       command: 'mise',
       args: ['x', '--', 'ruby-lsp'],
+    });
+  });
+
+  it('runs python as uvx pyrefly lsp through mise', async () => {
+    await fs.writeFile(join(repoPath, 'mise.toml'), '[tools]\n');
+    await addExecutable(binPath, 'mise');
+
+    expect(resolveServerCommand('python', repoPath)).toEqual({
+      command: 'mise',
+      args: ['x', '--', 'uvx', 'pyrefly', 'lsp'],
     });
   });
 
@@ -137,11 +147,11 @@ describe('resolveServerCommand', () => {
     });
 
     it('resolves a server on PATH through PATHEXT', async () => {
-      const shim = await addExecutable(binPath, 'pyright-langserver.cmd');
+      const shim = await addExecutable(binPath, 'uvx.exe');
 
       expect(resolveServerCommand('python', repoPath)).toEqual({
         command: shim,
-        args: ['--stdio'],
+        args: ['pyrefly', 'lsp'],
       });
     });
 

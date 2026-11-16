@@ -24,7 +24,7 @@ const LANGUAGE_IDS_BY_EXTENSION: Record<string, { language: LspLanguage; languag
 const SERVER_COMMANDS: Record<LspLanguage, { command: string; args: string[] }> = {
   ruby: { command: 'ruby-lsp', args: [] },
   typescript: { command: 'typescript-language-server', args: ['--stdio'] },
-  python: { command: 'pyright-langserver', args: ['--stdio'] },
+  python: { command: 'uvx', args: ['pyrefly', 'lsp'] },
 };
 
 export function detectLanguage(filePath: string): LspLanguage | null {
