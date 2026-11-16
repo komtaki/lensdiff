@@ -73,7 +73,7 @@ describe('resolveServerCommand', () => {
   it.each([
     ['ruby', 'ruby-lsp', []],
     ['typescript', 'typescript-language-server', ['--stdio']],
-    ['python', 'pyright-langserver', ['--stdio']],
+    ['python', 'uvx', ['pyrefly@1.4.1', 'lsp']],
   ] as const)('starts %s with %s', (language, command, args) => {
     expect(resolveServerCommand(language, repoPath)).toEqual({ command, args });
   });
@@ -137,11 +137,11 @@ describe('resolveServerCommand', () => {
     });
 
     it('resolves a server on PATH through PATHEXT', async () => {
-      const shim = await addExecutable(binPath, 'pyright-langserver.cmd');
+      const shim = await addExecutable(binPath, 'uvx.exe');
 
       expect(resolveServerCommand('python', repoPath)).toEqual({
         command: shim,
-        args: ['--stdio'],
+        args: ['pyrefly@1.4.1', 'lsp'],
       });
     });
 

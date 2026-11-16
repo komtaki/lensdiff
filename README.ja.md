@@ -21,7 +21,7 @@ lensdiff は [difit](https://github.com/yoshiko-pg/difit) の fork で、AI エ�
 - **承認**: ヘッダーの **Approve** ボタンで、レビューを承認として終えます。タブを閉じたときと同じようにコメントを出力したあと `✅ Approved` の行を出し、`--keep-alive` を付けていても exit code 0 で終了します。コメントは直せばよく、再レビューは不要という意味です。静的サイトモードでは表示しません。
 - **レビュアーの進捗**: `lensdiff reviewer start --port <port> <name>` と `lensdiff reviewer done --port <port> <name>` で報告します。
 - **判断を次の周に引き継ぐ**: 採用 / 却下の判断はブランチごとに `$(git rev-parse --git-common-dir)/lensdiff/decisions/<branch>.json` へ保存され、次の周のレビューに反映されます。確認と削除は `lensdiff decisions get [--branch <name>]` と `lensdiff decisions clear [--branch <name>]` です。
-- **宣言ジャンプ / 参照検索**: シンボルを Cmd/Ctrl+クリックすると、PATH 上の `ruby-lsp`、`typescript-language-server`、`pyright-langserver` で定義と参照を引きます（TypeScript はリポジトリの `node_modules/.bin` を優先します）。対象が `HEAD`、`working`、`.` のときだけ使えます。右パネルには定義を含むファイル全体を表示します。
+- **宣言ジャンプ / 参照検索**: シンボルを Cmd/Ctrl+クリックすると、PATH 上の `ruby-lsp`、`typescript-language-server` で定義と参照を引きます（TypeScript はリポジトリの `node_modules/.bin` を優先します）。Python は `uvx pyrefly@1.4.1 lsp` で起動します（PATH 上に `uv` が必要です）。対象が `HEAD`、`working`、`.` のときだけ使えます。右パネルには定義を含むファイル全体を表示します。
 
   ![シンボルパネル](docs/images/symbol-panel.png)
 

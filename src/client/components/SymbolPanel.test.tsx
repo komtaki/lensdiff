@@ -14,7 +14,7 @@ const status: LspStatusResponse = {
   servers: [
     { language: 'ruby', state: 'idle' },
     { language: 'typescript', state: 'ready' },
-    { language: 'python', state: 'unavailable', detail: 'spawn pyright-langserver ENOENT' },
+    { language: 'python', state: 'unavailable', detail: 'spawn uvx ENOENT' },
   ],
 };
 
@@ -248,7 +248,7 @@ describe('SymbolPanel', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Language server timed out');
     expect(screen.getByText('typescript')).toBeInTheDocument();
     expect(screen.getByText('ready')).toBeInTheDocument();
-    expect(screen.getByTitle('spawn pyright-langserver ENOENT')).toHaveTextContent('unavailable');
+    expect(screen.getByTitle('spawn uvx ENOENT')).toHaveTextContent('unavailable');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

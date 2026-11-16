@@ -12,7 +12,7 @@ const enabledStatus: LspStatusResponse = {
   servers: [
     { language: 'ruby', state: 'idle' },
     { language: 'typescript', state: 'ready' },
-    { language: 'python', state: 'unavailable', detail: 'spawn pyright-langserver ENOENT' },
+    { language: 'python', state: 'unavailable', detail: 'spawn uvx ENOENT' },
   ],
 };
 
