@@ -6,6 +6,7 @@ import type { DiffFile, DiffLine } from '../../types/diff';
 import { FrontmatterTable } from '../components/FrontmatterTable';
 import { MermaidDiagram } from '../components/MermaidDiagram';
 import { PrismSyntaxHighlighter } from '../components/PrismSyntaxHighlighter';
+import { MarkdownImage } from '../components/ZoomableImage';
 import type { MergedChunk } from '../hooks/useExpandedLines';
 import { extractFrontmatter, getFrontmatterLines } from '../utils/frontmatter';
 import { computeFrontmatterDiff } from '../utils/frontmatterDiff';
@@ -257,20 +258,7 @@ export const getMarkdownComponents = (syntaxTheme?: DiffViewerBodyProps['syntaxT
       </a>
     );
   },
-  img: ({ src, alt }: { src?: string; alt?: string }) => {
-    const safeSrc = src ?? '';
-    if (!safeSrc || !isSafeUrl(safeSrc)) {
-      return null;
-    }
-    return (
-      <img
-        src={safeSrc}
-        alt={alt ?? ''}
-        loading="lazy"
-        className="max-w-full rounded border border-github-border"
-      />
-    );
-  },
+  img: MarkdownImage,
   pre: ({ children }: { children?: React.ReactNode }) => {
     const nodes = Array.isArray(children) ? children : [children];
     const codeElement = nodes.find(isElementWithCodeProps);

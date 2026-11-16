@@ -10,6 +10,7 @@ import { extractMarkdownText, isElementWithCodeProps, isSafeUrl } from '../utils
 import { DiffCodeLine } from './DiffCodeLine';
 import { PrismSyntaxHighlighter } from './PrismSyntaxHighlighter';
 import type { AppearanceSettings } from './SettingsModal';
+import { MarkdownImage } from './ZoomableImage';
 
 const COMMENT_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 
@@ -142,20 +143,7 @@ const getCommentMarkdownComponents = (syntaxTheme?: AppearanceSettings['syntaxTh
       </a>
     );
   },
-  img: ({ src, alt }: { src?: string; alt?: string }) => {
-    const safeSrc = src ?? '';
-    if (!safeSrc || !isSafeUrl(safeSrc)) {
-      return null;
-    }
-    return (
-      <img
-        src={safeSrc}
-        alt={alt ?? ''}
-        loading="lazy"
-        className="max-w-full rounded border border-github-border"
-      />
-    );
-  },
+  img: MarkdownImage,
   pre: ({ children }: { children?: React.ReactNode }) => {
     const nodes = Array.isArray(children) ? children : [children];
     const codeElement = nodes.find(isElementWithCodeProps);

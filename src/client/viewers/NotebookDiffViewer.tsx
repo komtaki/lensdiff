@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import type { DiffLine } from '../../types/diff';
 import { EnhancedPrismSyntaxHighlighter } from '../components/EnhancedPrismSyntaxHighlighter';
 import { PrismSyntaxHighlighter } from '../components/PrismSyntaxHighlighter';
+import { MarkdownImage } from '../components/ZoomableImage';
 import type { MergedChunk } from '../hooks/useExpandedLines';
 import { extractMarkdownText, isElementWithCodeProps, isSafeUrl } from '../utils/markdownUtils';
 
@@ -639,20 +640,7 @@ const getMarkdownComponents = (syntaxTheme?: DiffViewerBodyProps['syntaxTheme'])
       </a>
     );
   },
-  img: ({ src, alt }: { src?: string; alt?: string }) => {
-    const safeSrc = src ?? '';
-    if (!safeSrc || !isSafeUrl(safeSrc)) {
-      return null;
-    }
-    return (
-      <img
-        src={safeSrc}
-        alt={alt ?? ''}
-        loading="lazy"
-        className="max-w-full rounded border border-github-border"
-      />
-    );
-  },
+  img: MarkdownImage,
   pre: ({ children }: { children?: React.ReactNode }) => {
     const nodes = Array.isArray(children) ? children : [children];
     const codeElement = nodes.find(isElementWithCodeProps);
