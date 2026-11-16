@@ -104,7 +104,6 @@ export function ImageDiffViewer({
               alt={`Previous version of ${file.oldPath || file.path}`}
               className="max-w-full max-h-96 border border-github-border rounded mx-auto"
               style={checkerboardStyle}
-              lightboxStyle={checkerboardStyle}
               onLoad={(e) => handleImageLoad(e.currentTarget, setOldImageInfo)}
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
@@ -145,7 +144,6 @@ export function ImageDiffViewer({
               alt={`New image ${file.path}`}
               className="max-w-full max-h-96 border border-github-border rounded mx-auto"
               style={checkerboardStyle}
-              lightboxStyle={checkerboardStyle}
               onLoad={(e) => handleImageLoad(e.currentTarget, setNewImageInfo)}
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
@@ -189,7 +187,6 @@ export function ImageDiffViewer({
                   alt={`Previous version of ${file.oldPath || file.path}`}
                   className="max-w-full max-h-96 border border-github-border rounded mx-auto"
                   style={checkerboardStyle}
-                  lightboxStyle={checkerboardStyle}
                   onLoad={(e) => handleImageLoad(e.currentTarget, setOldImageInfo)}
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
@@ -221,7 +218,6 @@ export function ImageDiffViewer({
                   alt={`Current version of ${file.path}`}
                   className="max-w-full max-h-96 border border-github-border rounded mx-auto"
                   style={checkerboardStyle}
-                  lightboxStyle={checkerboardStyle}
                   onLoad={(e) => handleImageLoad(e.currentTarget, setNewImageInfo)}
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
@@ -263,7 +259,6 @@ export function ImageDiffViewer({
                   alt={`Previous version of ${file.oldPath || file.path}`}
                   className="max-w-full max-h-96 border border-github-border rounded mx-auto"
                   style={checkerboardStyle}
-                  lightboxStyle={checkerboardStyle}
                   onLoad={(e) => handleImageLoad(e.currentTarget, setOldImageInfo)}
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
@@ -295,7 +290,6 @@ export function ImageDiffViewer({
                   alt={`Current version of ${file.path}`}
                   className="max-w-full max-h-96 border border-github-border rounded mx-auto"
                   style={checkerboardStyle}
-                  lightboxStyle={checkerboardStyle}
                   onLoad={(e) => handleImageLoad(e.currentTarget, setNewImageInfo)}
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;

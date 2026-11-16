@@ -11,6 +11,8 @@ import {
 import { createPortal } from 'react-dom';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 
+import { isSafeUrl } from '../utils/markdownUtils';
+
 interface ImageLightboxProps {
   src: string;
   alt: string;
@@ -22,7 +24,7 @@ function ImageLightbox({ src, alt, style, onClose }: ImageLightboxProps) {
   const { activeScopes, enableScope, disableScope } = useHotkeysContext();
   const [suspendedScopes] = useState(activeScopes);
 
-  useHotkeys('escape', () => onClose(), [onClose]);
+  useHotkeys('escape', onClose);
 
   useEffect(() => {
     suspendedScopes.forEach(disableScope);
@@ -62,23 +64,20 @@ type ZoomableImageProps = Omit<
   'onClick' | 'onKeyDown' | 'tabIndex'
 > & {
   src: string;
-  lightboxStyle?: CSSProperties;
 };
-
-const isInsideLink = (element: HTMLElement) => element.closest('a') !== null;
 
 export function ZoomableImage({
   src,
   alt = '',
   className = '',
-  lightboxStyle,
+  style,
   ...imgProps
 }: ZoomableImageProps) {
   const [isOpen, setIsOpen] = useState(false);
   const imageRef = useRef<HTMLImageElement>(null);
 
   const open = (event: MouseEvent<HTMLImageElement> | KeyboardEvent<HTMLImageElement>) => {
-    if (isInsideLink(event.currentTarget)) return;
+    if (event.currentTarget.closest('a')) return;
     event.preventDefault();
     event.stopPropagation();
     setIsOpen(true);
@@ -102,12 +101,27 @@ export function ZoomableImage({
         ref={imageRef}
         src={src}
         alt={alt}
+        style={style}
         tabIndex={0}
         className={`cursor-zoom-in [a_&]:cursor-pointer ${className}`}
         onClick={open}
         onKeyDown={handleKeyDown}
       />
-      {isOpen && <ImageLightbox src={src} alt={alt} style={lightboxStyle} onClose={close} />}
+      {isOpen && <ImageLightbox src={src} alt={alt} style={style} onClose={close} />}
     </>
+  );
+}
+
+export function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
+  if (!src || !isSafeUrl(src)) {
+    return null;
+  }
+  return (
+    <ZoomableImage
+      src={src}
+      alt={alt ?? ''}
+      loading="lazy"
+      className="max-w-full rounded border border-github-border"
+    />
   );
 }

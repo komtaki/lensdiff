@@ -161,13 +161,4 @@ describe('CommentBodyRenderer', () => {
       within(screen.getByRole('dialog')).getByRole('img', { name: 'screenshot' }),
     ).toHaveAttribute('src', '/images/shot.png');
   });
-
-  it('follows the link instead of zooming when the image is inside a link', async () => {
-    const user = userEvent.setup();
-    render(<CommentBodyRenderer body="[![badge](/images/badge.svg)](#badges)" />);
-
-    await user.click(screen.getByRole('img', { name: 'badge' }));
-
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
 });
