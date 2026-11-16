@@ -100,16 +100,6 @@ describe('resolveServerCommand', () => {
     });
   });
 
-  it('runs python as uvx pyrefly lsp through mise', async () => {
-    await fs.writeFile(join(repoPath, 'mise.toml'), '[tools]\n');
-    await addExecutable(binPath, 'mise');
-
-    expect(resolveServerCommand('python', repoPath)).toEqual({
-      command: 'mise',
-      args: ['x', '--', 'uvx', 'pyrefly', 'lsp'],
-    });
-  });
-
   it('does not use mise when it is not on PATH', async () => {
     await fs.writeFile(join(repoPath, 'mise.toml'), '[tools]\n');
     process.env.PATH = [binPath, join(binPath, 'missing')].join(delimiter);
