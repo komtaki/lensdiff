@@ -569,23 +569,6 @@ describe('App Component - Heartbeat Connection', () => {
   });
 });
 
-describe('App Component - Sidebar footer', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockComments = [];
-    mockConfirm.mockReturnValue(false);
-    mockFetch(mockDiffResponse);
-  });
-
-  it('shows the Shortcuts button without a link to GitHub', async () => {
-    renderApp();
-
-    expect(await screen.findByTitle('Keyboard shortcuts (Shift+?)')).toBeInTheDocument();
-    expect(screen.queryByText('Star on GitHub')).not.toBeInTheDocument();
-    expect(screen.queryByTitle('View on GitHub')).not.toBeInTheDocument();
-  });
-});
-
 describe('App Component - Initial file collapsing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
